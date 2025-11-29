@@ -1,0 +1,5 @@
+data/*
+venv/*
+.env
+
+faiss_hotpotqa_index_*

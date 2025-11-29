@@ -84,7 +84,7 @@ def initialize_models(provider: str) -> Tuple[Any, Any]:
         raise ValueError(f"Unknown provider: {provider}. Choose 'openai', 'gemini', or 'ollama'.")
     
     from langchain_ollama import OllamaEmbeddings
-    embeddings = OllamaEmbeddings(model="llama3.2")
+    embeddings = OllamaEmbeddings(model="all-minilm")
 
     return embeddings, llm
 

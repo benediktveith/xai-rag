@@ -1,5 +1,2 @@
-data/*
-venv/*
-.env
-
-faiss_hotpotqa_index_*
+# Created by venv; see https://docs.python.org/3/library/venv.html
+*

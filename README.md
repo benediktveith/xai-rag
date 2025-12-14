@@ -1,111 +1,81 @@
+# XAI-RAG
+
+This project is a Python-based framework for building and evaluating explainable Retrieval-Augmented Generation (RAG) systems. It is designed to work with the HotpotQA dataset and provides tools for explaining the behavior of the retrieval model using SHAP.
+
+## Features
+
+- **Retrieval-Augmented Generation (RAG):** Implements a RAG pipeline using `langchain` for document retrieval and generation.
+- **Explainable AI (XAI):** Uses SHAP to explain the ranking of retrieved documents, providing insights into the model's behavior.
+- **Flexible LLM Support:** Supports both local models via Ollama (e.g., Llama 3, Mistral) and proprietary models via OpenAI API (e.g., GPT-4o).
+- **Vector Store:** Utilizes ChromaDB for efficient vector storage and retrieval.
+- **Data Handling:** Includes a data loader for the HotpotQA dataset, which automatically downloads and processes the data.
+- **Modular Structure:** The project is organized into modules for data loading, LLM interaction, and the RAG engine.
+
 ## Installation
 
-### 1. Python Environment Setup
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd xai-rag
+    ```
+
+2.  **Create a virtual environment:**
+    ```bash
+    python -m venv .
+    source bin/activate
+    ```
+
+3.  **Install the dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Set up environment variables:**
+    If you plan to use the OpenAI API, you need to set your API key as an environment variable. Create a `.env` file in the root of the project and add the following line:
+    ```
+    OPENAI_API_KEY="your-api-key"
+    ```
+
+## Usage
+
+The main entry point for the project is `main.py`. You can run it from the command line:
 
 ```bash
-# Optional: Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+python main.py
 ```
 
-Ihr braucht Ollama mit LLama3.2 damit die Embeddings erstellt werden können!
+The project can be configured to use different LLMs and retrieval settings. See the `src/modules/` directory for more details on the available options.
 
-### 2. Gemini & OpenAI API Key
+The `notebooks/` directory contains a Jupyter notebook for exploring the explainability features of the project.
 
-Setze deinen Gemini / OpenAI API Key als Environment Variable unter .env:
+## Project Structure
 
-```bash
-OPENAI_API_KEY='sk-your-api-key-here'
-GOOGLE_API_KEY='sk-your-api-key-here'
+```
+.
+├── data/                    # Data files
+├── notebooks/               # Jupyter notebooks
+│   └── DeepShapNRM.ipynb    # Notebook for SHAP explanations
+├── src/                     # Source code
+│   ├── modules/
+│   │   ├── data_loader.py   # Data loader for HotpotQA
+│   │   ├── llm_client.py    # Client for LLM interaction
+│   │   └── rag_engine.py    # RAG engine implementation
+│   └── evaluation/          # Evaluation scripts
+├── main.py                  # Main entry point
+├── requirements.txt         # Python dependencies
+└── setup.py                 # Setup script
 ```
 
-## Verwendung
+## Dependencies
 
-### Starten des Systems
+The project uses the following major libraries:
 
-```bash
-python main.py # Ollama is default
+- `langchain`
+- `chromadb`
+- `shap`
+- `torch`
+- `transformers`
+- `openai`
+- `ollama`
 
-# Für OpenAI / Gemini:
-python main.py --provider openai
-python main.py --provider gemini
-```
-
-### Beim ersten Start
-
-Das System wird automatisch:
-1. Den HotPotQA Test-Datensatz herunterladen (~50MB)
-2. Dokumente aus dem Datensatz extrahieren
-3. Embeddings generieren und FAISS-Index erstellen (dauert einige Minuten)
-4. Den Index für zukünftige Verwendung speichern
-
-Beim nächsten Start lädt das System einfach den existierenden FAISS-Index!
-
-### Befehle
-
-- **Normal fragen**: Tippe deine Frage und drücke Enter
-- **`clear`**: Löscht die Conversation History
-- **`exit` oder `quit`**: Beendet das Programm
-
-## HotPotQA Dataset
-
-### Was ist HotPotQA?
-
-HotPotQA ist ein Question-Answering-Dataset, das Multi-Hop-Reasoning benötigt:
-- **Multi-Hop**: Fragen erfordern das Kombinieren von Informationen aus mehreren Dokumenten
-- **Explainable**: Enthält "supporting facts" die zeigen, welche Sätze zur Antwort beitragen
-- **Wikipedia-basiert**: Alle Kontexte stammen aus Wikipedia-Artikeln
-
-### Dataset-Format
-
-```json
-{
-  "_id": "5a8b57f25542995d1e6f1371",
-  "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
-  "answer": "yes",
-  "supporting_facts": [
-    ["Scott Derrickson", 0],
-    ["Ed Wood", 0]
-  ],
-  "context": [
-    ["Scott Derrickson", ["Scott Derrickson is an American filmmaker..."]],
-    ["Ed Wood", ["Edward Davis Wood Jr. was an American filmmaker..."]]
-  ]
-}
-```
-
-### Wie das RAG-System HotPotQA nutzt
-
-1. **Document Creation**: Jeder Wikipedia-Artikel im Context wird zu einem LangChain Document
-2. **Metadata**: Jedes Dokument speichert:
-   - Title des Artikels
-   - Zugehörige Frage und Antwort
-   - Ob es ein "supporting fact" ist
-3. **Text Splitting**: Lange Artikel werden in Chunks für besseres Retrieval aufgeteilt
-4. **Embedding & Indexing**: FAISS-Index für schnelle Similarity-Search
-5. **Retrieval**: Bei Fragen werden die 4 relevantesten Chunks abgerufen
-
-## Conversational RAG für Multi-Hop Questions
-
-Das System ist besonders stark bei Multi-Hop-Fragen:
-
-**Beispiel 1: Iteratives Reasoning**
-```
-Q: Who directed the movie that won Best Picture in 2020?
-A: [System sucht nach Best Picture 2020 → "Parasite"]
-
-Q: Where was he born?
-A: [System versteht "he" = Bong Joon-ho, sucht nach seiner Biografie]
-```
-
-**Beispiel 2: Follow-up Details**
-```
-Q: What university did the founder of Microsoft attend?
-A: [Findet Bill Gates → Harvard]
-
-Q: When did he drop out?
-A: [Versteht Kontext, sucht nach spezifischen Daten]
-```
+For a full list of dependencies, see the `requirements.txt` file.

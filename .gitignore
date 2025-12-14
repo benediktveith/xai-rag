@@ -1,2 +1,51 @@
+# --- Python & Virtual Environments ---
 # Created by venv; see https://docs.python.org/3/library/venv.html
-*
+venv/
+env/
+.env             # Ignore API keys/environment variables
+
+# --- Bytecode & Cache ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Project Data ---
+# Ignore the data folder contents (hotpotqa, raw jsons, processed chunks)
+data/
+
+# --- Local Vector Stores ---
+# If you save ChromaDB locally outside of data/
+chroma_db/
+vector_store/
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints/
+share/
+# *.ipynb_checkpoints
+
+# --- Distribution / Build Artifacts (Crucial for pip install -e .) ---
+build/
+dist/
+develop-eggs/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Unit Testing ---
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- OS / Editor System Files ---
+.DS_Store        # Mac
+thumbs.db        # Windows
+.vscode/         # VS Code settings
+.idea/           # PyCharm settings

@@ -14,11 +14,6 @@ __pycache__/
 # Ignore the data folder contents (hotpotqa, raw jsons, processed chunks)
 data/
 
-# --- Local Vector Stores ---
-# If you save ChromaDB locally outside of data/
-chroma_db/
-vector_store/
-
 # --- Jupyter Notebooks ---
 .ipynb_checkpoints/
 share/

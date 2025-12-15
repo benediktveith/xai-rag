@@ -44,3 +44,7 @@ htmlcov/
 thumbs.db        # Windows
 .vscode/         # VS Code settings
 .idea/           # PyCharm settings
+
+docs/*
+faiss_*/
+.env

@@ -136,7 +136,7 @@ class DataLoader:
                         "answer": answer,
                         # Crucial for Plausibility Metric:
                         "is_supporting": is_supporting, 
-                        "gold_sentence_indices": gold_indices, 
+                        "gold_sentence_indices": ",".join(map(str, gold_indices)), 
                         "source": "hotpotqa"
                     }
                 )

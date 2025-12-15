@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -81,6 +81,29 @@ class RAGEngine:
             raise RuntimeError("RagEngine not setup. Call setup() first.")
         
         return self._retriever.invoke(query)
+
+    def retrieve_with_scores(self, query: str, k: int = 4) -> List[Dict[str, Any]]:
+        """
+        Returns retrieval trace with scores and metadata for explainability.
+        """
+        if not self._vectorstore:
+            raise RuntimeError("RagEngine not setup. Call setup() first.")
+
+        results = self._vectorstore.similarity_search_with_relevance_scores(query, k=k)
+        trace: List[Dict[str, Any]] = []
+
+        for idx, (doc, score) in enumerate(results):
+            text = doc.page_content
+            trace.append(
+                {
+                    "id": f"chunk-{idx+1}",
+                    "score": float(score),
+                    "title": doc.metadata.get("title", ""),
+                    "content": text,
+                    "metadata": doc.metadata,
+                }
+            )
+        return trace
 
     def get_retriever(self):
         """Returns the raw retriever object for use in LangChain chains"""

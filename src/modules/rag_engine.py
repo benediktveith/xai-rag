@@ -59,8 +59,8 @@ class RAGEngine:
         
         # 1. Split Documents (Crucial for RAG)
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,  # Size of each chunk
-            chunk_overlap=50 # Overlap to maintain context
+            #chunk_size=500,  # Size of each chunk
+            #chunk_overlap=50 # Overlap to maintain context
         )
         splits = text_splitter.split_documents(documents)
         print(f"Split into {len(splits)} chunks.")

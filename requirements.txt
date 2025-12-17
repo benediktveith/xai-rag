@@ -123,6 +123,7 @@ protobuf==6.33.2
 psutil==7.1.3
 ptyprocess==0.7.0
 pure_eval==0.2.3
+pyarrow==22.0.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pybase64==1.4.3
@@ -181,6 +182,7 @@ watchfiles==1.1.1
 wcwidth==0.2.14
 websocket-client==1.9.0
 websockets==15.0.1
+-e git+https://github.com/benediktveith/xai-rag.git@e36cebddf2bfffc1d33b203228ecbec34e5b2252#egg=xai_rag
 xxhash==3.6.0
 yarl==1.22.0
 zipp==3.23.0

@@ -22,7 +22,7 @@ class LLMClient:
             return self._llm
 
         if self.provider == "ollama":
-            print(f"🔌 Connecting to local Ollama ({self.model_name})...")
+            print(f"Connecting to local Ollama ({self.model_name})...")
             self._llm = ChatOllama(
                 model=self.model_name,
                 temperature=0  # Deterministic for explainability experiments

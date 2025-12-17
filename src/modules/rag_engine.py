@@ -11,8 +11,6 @@ class RAGEngine:
     def __init__(self, persist_dir: str = "../data/vector_db"):
         self.persist_dir = persist_dir
         
-        # Best local embedding model for general RAG (fast & standard)
-        # You can swap this for OllamaEmbeddings if you want 100% Ollama
         self.embedding_model = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )

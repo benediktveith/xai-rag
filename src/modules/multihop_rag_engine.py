@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 from .rag_engine import RAGEngine
 from .llm_client import LLMClient
+from .cot_explainable import _format_documents
 
 class MultiHopRAGEngine:
     """
@@ -21,6 +22,7 @@ class MultiHopRAGEngine:
             
         self.rag_engine = rag_engine
         self.llm = llm_client.get_llm()
+        self._llm_client = llm_client
         self.num_hops = num_hops
 
     def run_and_trace(self, initial_query: str) -> Dict[str, Any]:
@@ -41,6 +43,7 @@ class MultiHopRAGEngine:
 
         print(f"--- Starting Multi-Hop Search for: '{initial_query}' ---")
 
+        all_documents = []
         for i in range(self.num_hops):
             hop_number = i + 1
             print(f"\n[ Hop {hop_number} ]")
@@ -54,6 +57,7 @@ class MultiHopRAGEngine:
             
             # For simplicity, we'll focus on the top document for the trace
             top_doc = retrieved_docs[0]
+            all_documents.append(top_doc)
 
             # 2. Store the results of this hop in our trace
             hop_info = {
@@ -62,13 +66,13 @@ class MultiHopRAGEngine:
                 "retrieved_document_for_this_hop": top_doc
             }
             trace["hops"].append(hop_info)
-            
+
             # 3. Accumulate context for the next steps
-            context_so_far += f"\n\n--- Context from Hop {hop_number} (Query: {current_query}) ---\n{top_doc.page_content}"
+            context_so_far += f"\n\n {_format_documents([top_doc], current_query, hop_number)}"
 
             # 4. If not the last hop, generate the next query
             if i < self.num_hops - 1:
-                prompt = self._create_next_query_prompt(initial_query, context_so_far)
+                prompt = self._llm_client._create_next_query_prompt(initial_query, context_so_far)
                 print("Generating next query...")
                 
                 llm_response = self.llm.invoke(prompt)
@@ -78,43 +82,14 @@ class MultiHopRAGEngine:
 
         # 5. After all hops, generate the final answer using all gathered context
         print("\nGenerating final answer...")
-        answer_prompt = self._create_final_answer_prompt(initial_query, context_so_far)
+        answer_prompt = self._llm_client._create_final_answer_prompt(initial_query, context_so_far)
         
         final_answer_response = self.llm.invoke(answer_prompt)
         final_answer = final_answer_response.content.strip()
 
         trace["final_answer"] = final_answer
+        print('')
         print(f"--- Multi-Hop Search Complete. Final Answer: {final_answer} ---")
+        print(f"--- Multi-Hop Context: {context_so_far} ---")
 
-        return trace
-
-    def _create_next_query_prompt(self, initial_query: str, context: str) -> str:
-        """Creates the prompt to generate the next search query."""
-
-        return f"""
-            You are a research assistant. Your goal is to break down a complex question into a series of search queries.
-            Based on the original question and the context gathered so far, generate the next specific search query to find the missing information.
-            Do not repeat queries. Generate only the new search query and nothing else.
-
-            Original Question: {initial_query}
-
-            Context Gathered So Far:
-            {context}
-
-            Next Search Query:
-            """
-
-    def _create_final_answer_prompt(self, initial_query: str, context: str) -> str:
-        """Creates the prompt to generate the final answer from the accumulated context."""
-        
-        return f"""
-            You are a helpful assistant. Using all the provided context from multiple search hops, you must answer the original question.
-            If the context is not sufficient, state that you cannot answer the question with the given information.
-
-            Original Question: {initial_query}
-
-            Full Context from all search hops:
-            {context}
-
-            Final Answer:
-            """
+        return trace, all_documents

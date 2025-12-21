@@ -278,3 +278,34 @@ class CoTExplainable(ExplainableModule):
         response = llm.invoke(messages)
         
         return self._parse_llm_response(response)
+
+    @staticmethod
+    def prettify(explanation: Any) -> str:
+        """
+        Formats an ExplainableAnswer into a readable string showing evidence with supports and linked reasoning steps.
+        """
+
+        def _to_model(obj: Any) -> ExplainableAnswer:
+            if isinstance(obj, ExplainableAnswer):
+                return obj
+            if isinstance(obj, dict):
+                return ExplainableAnswer.model_validate(obj)
+            raise TypeError(f"Unsupported explanation type: {type(obj)!r}")
+
+        expl = _to_model(explanation)
+        lines: List[str] = []
+
+        for ev in expl.evidence:
+            lines.append(f"evidence: {ev.span}")
+            lines.append(f"  support: {', '.join(ev.support)}")
+            lines.append(f"  rationale: {ev.rationale}")
+
+            related_steps = [
+                step for step in expl.reasoning if any(sup in step.support for sup in ev.support)
+            ]
+            for step in related_steps:
+                lines.append(f"    step {step.step}: {step.statement}")
+                if step.quote:
+                    lines.append(f"      quote: {step.quote}")
+
+        return "\n".join(lines)

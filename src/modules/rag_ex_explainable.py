@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
@@ -17,12 +18,14 @@ class RAGExConfig:
     Only leave-one-token-out is active by default; more strategies can be added later.
     """
 
-    perturbation_strategies: Tuple[str, ...] = ("leave_one_out",)
+    perturbation_strategies: Tuple[str, ...] = ("leave_one_out", "random_noise")
     max_tokens: int | None = None
     embedding_model: str = "all-MiniLM-L6-v2"
     weight_levenshtein: float = 0.4
     weight_semantic: float = 0.6
     aggregation: str = "max"  # how to merge multiple perturbations per token: "max" or "mean"
+    # If empty/None, noise tokens will be generated on the fly via LLM.
+    noise_tokens: Tuple[str, ...] = ()
 
     def normalized_weights(self) -> Tuple[float, float]:
         total = self.weight_levenshtein + self.weight_semantic
@@ -76,6 +79,7 @@ class RAGExExplainable(ExplainableModule):
         self.config = config or RAGExConfig()
         self._sbert_model: SentenceTransformer | None = None
         self._llm = self.llm_client.get_llm()
+        self._noise_words: List[str] = []
 
     def _ensure_sbert(self) -> None:
         if self._sbert_model or SentenceTransformer is None:
@@ -96,15 +100,49 @@ class RAGExExplainable(ExplainableModule):
     def _perturb_context(self, tokens: List[str], drop_index: int) -> str:
         return "".join(tokens[:drop_index] + tokens[drop_index + 1 :])
 
+    def _generate_noise_words_via_llm(self, k: int = 15) -> List[str]:
+        prompt = (
+            "Provide a comma-separated list of random, unrelated single words. "
+            "Do not number them. Example: apple, river, neon, cobalt"
+        )
+        try:
+            response = self._llm.invoke(prompt)
+            text = _extract_answer_text(response)
+            raw_tokens = re.split(r"[,\n]", text)
+            cleaned = [tok.strip() for tok in raw_tokens if tok.strip()]
+            if cleaned:
+                return cleaned[:k]
+        except Exception:
+            pass
+        return ["foo", "bar", "baz", "qux", "noise"]
+
+    def _sample_noise_word(self) -> str:
+        if self.config.noise_tokens:
+            pool = list(self.config.noise_tokens)
+        else:
+            if not self._noise_words:
+                self._noise_words = self._generate_noise_words_via_llm()
+            pool = self._noise_words
+        return random.choice(pool) if pool else "noise"
+
+    def _perturb_random_noise(self, tokens: List[str], token_index: int) -> str:
+        noise = self._sample_noise_word()
+        new_tokens = list(tokens)
+        new_tokens[token_index] = noise
+        return "".join(new_tokens)
+
     def _generate_perturbations(self, tokens: List[str], token_index: int) -> List[Tuple[str, str]]:
         """
         Returns a list of (strategy_name, perturbed_context) for the given token.
-        Only leave_one_out is implemented now; extend here for additional strategies.
+        Supports leave_one_out, random_noise.
         """
         perturbations: List[Tuple[str, str]] = []
 
         if "leave_one_out" in self.config.perturbation_strategies:
             perturbations.append(("leave_one_out", self._perturb_context(tokens, token_index)))
+
+        if "random_noise" in self.config.perturbation_strategies:
+            perturbations.append(("random_noise", self._perturb_random_noise(tokens, token_index)))
 
         return perturbations
 
@@ -132,7 +170,7 @@ class RAGExExplainable(ExplainableModule):
         raw_scores: List[float] = []
 
         for id, idx in enumerate(candidate_indices):
-            print(f'Pertubating {id} of {len(candidate_indices)}')
+            print(f'Pertubating {id + 1} of {len(candidate_indices)}')
 
             per_strategy_scores: List[float] = []
             per_strategy_details: List[Dict[str, Any]] = []
@@ -183,3 +221,22 @@ class RAGExExplainable(ExplainableModule):
             "context": context,
             "results": results,
         }
+
+    @staticmethod
+    def prettify(explanation: Dict[str, Any]) -> str:
+        """
+        Returns a formatted string listing tokens with their normalized importance and per-strategy details.
+        """
+        lines = ["token\timportance\tstrategies"]
+        for item in explanation.get("results", []):
+            token_display = item.get("token", "").replace("\n", "\\n")
+            importance = item.get("importance", 0.0)
+            details = item.get("details", [])
+            detail_parts = []
+            for d in details:
+                detail_parts.append(
+                    f"{d.get('strategy')}:raw={d.get('importance_raw', 0.0):.3f},sim={d.get('combined_similarity', 0.0):.3f}"
+                )
+            lines.append(f"{token_display}\t{importance:.3f}\t{' | '.join(detail_parts)}")
+
+        return "\n".join(lines)

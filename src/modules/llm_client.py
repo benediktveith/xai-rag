@@ -85,7 +85,7 @@ class LLMClient:
             Next Search Query:
             """
     
-    def _create_final_answer_prompt(self, initial_query: str, context: str) -> str:
+    def _create_final_answer_prompt(self, initial_query: str, context: str, extra: str = '') -> str:
         """Creates the prompt to generate the final answer from the accumulated context."""
         
         return f"""
@@ -97,5 +97,6 @@ class LLMClient:
             Full Context from all search hops:
             {context}
 
+            {extra}
             Final Answer:
             """

@@ -17,7 +17,7 @@ class RAGEngine:
         self._vectorstore = None
         self._retriever = None
 
-    def setup(self, documents: Optional[List[Document]] = None, reset: bool = False):
+    def setup(self, documents: Optional[List[Document]] = None, reset: bool = False, k_documents: int = 4):
         """
         Initializes the vector store.
         If 'documents' are provided and DB is empty (or reset=True), it ingests them.
@@ -48,7 +48,7 @@ class RAGEngine:
         # Initialize the retriever interface
         self._retriever = self._vectorstore.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": 4} # Adjust 'k' based on HotpotQA needs
+            search_kwargs={"k": k_documents} # Adjust 'k' based on HotpotQA needs
         )
         print("RagEngine ready.")
 

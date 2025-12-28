@@ -57,13 +57,15 @@ class MultiHopRAGEngine:
             
             # For simplicity, we'll focus on the top document for the trace
             top_doc = retrieved_docs[0]
+            lowest_doc = retrieved_docs[-1] # also track the lowest ranked document
             all_documents.append(top_doc)
 
             # 2. Store the results of this hop in our trace
             hop_info = {
                 "hop_number": hop_number,
                 "query_for_this_hop": current_query,
-                "retrieved_document_for_this_hop": top_doc
+                "retrieved_document_for_this_hop": top_doc,
+                "lowest_ranked_document" : lowest_doc       # added for comparison to low ranked documents
             }
             trace["hops"].append(hop_info)
 

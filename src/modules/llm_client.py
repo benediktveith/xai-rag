@@ -1,33 +1,43 @@
 import os
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 
 
+
 class LLMClient:
-    def __init__(self, provider: str = "ollama", model_name: str = "llama3"):
+    def __init__(
+        self,
+        provider: str = "ollama",
+        model_name: str = "llama3",
+        structured_output = None,
+    ):
         """
         :param provider: 'ollama' or 'openai'
         :param model_name: e.g., 'llama3', 'mistral', 'gpt-4o'
+        :param structured_output: Return parsed Pydantic output when invoking the LLM.
         """
         self.provider = provider
         self.model_name = model_name
-        self._llm = None
+        self.structured_output = structured_output
+        self._base_llm: Optional[BaseChatModel] = None
+        self._structured_llm: Optional[Runnable] = None
 
-    def get_llm(self) -> BaseChatModel:
-        """Returns the initialized LangChain ChatModel"""
-        if self._llm:
-            return self._llm
+    def _init_base_llm(self) -> BaseChatModel:
+        """Lazily initialize the underlying chat model."""
+        if self._base_llm:
+            return self._base_llm
 
         if self.provider == "ollama":
-            print(f"🔌 Connecting to local Ollama ({self.model_name})...")
-            self._llm = ChatOllama(
+            print(f"Connecting to local Ollama ({self.model_name})...")
+            self._base_llm = ChatOllama(
                 model=self.model_name,
-                temperature=0  # Deterministic for explainability experiments
+                reasoning=False,
+                temperature=0
             )
         elif self.provider == "groq":
             print(f"Connecting to Groq ({self.model_name})...")
@@ -46,7 +56,7 @@ class LLMClient:
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
                 raise ValueError("OPENAI_API_KEY environment variable not set.")
-            self._llm = ChatOpenAI(
+            self._base_llm = ChatOpenAI(
                 model=self.model_name,
                 temperature=0,
                 api_key=api_key
@@ -54,60 +64,52 @@ class LLMClient:
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
-        return self._llm
+        return self._base_llm
 
-    def build_explainable_messages(
-        self,
-        question: str,
-        retrieval_trace: List[Dict[str, Any]],
-        answer_guidance: Optional[str] = "Antworte prägnant und auf Deutsch.",
-    ) -> List[BaseMessage]:
+    def get_llm(self) -> Runnable | BaseChatModel:
         """
-        Build System/User messages that force the LLM to explain which chunks it used.
+        Returns the LangChain ChatModel (optionally wrapped to enforce structured output).
+        By default, structured output is enabled to match the JSON format defined in the prompt.
+        """
+        wants_structured = self.structured_output is not None
+        base_llm = self._init_base_llm()
+
+        if wants_structured:
+            if self._structured_llm:
+                return self._structured_llm
+            self._structured_llm = base_llm.with_structured_output(self.structured_output, include_raw=True)
+            return self._structured_llm
+
+        return base_llm
+
+    def _create_next_query_prompt(self, initial_query: str, context: str) -> str:
+        """Creates the prompt to generate the next search query."""
+
+        return f"""
+            You are a research assistant. Your goal is to break down a complex question into a series of search queries.
+            Based on the original question and the context gathered so far, generate the next specific search query to find the missing information.
+            Do not repeat queries. Generate only the new search query and nothing else.
+
+            Original Question: {initial_query}
+
+            Context Gathered So Far:
+            {context}
+
+            Next Search Query:
+            """
+    
+    def _create_final_answer_prompt(self, initial_query: str, context: str, extra: str = '') -> str:
+        """Creates the prompt to generate the final answer from the accumulated context."""
         
-        Args:
-            question: Original user question.
-            retrieval_trace: Output of RAGEngine.retrieve_with_scores.
-            answer_guidance: Optional stylistic guidance for the answer.
-        """
-        system_content = (
-            "Du bist ein erklärbarer RAG-Assistent. Nutze ausschließlich die "
-            "bereitgestellten Kontext-Chunks. Gib zuerst eine kurze Antwort. "
-            "Führe danach eine Begründung auf, die auf Chunk-IDs und Titel verweist. "
-            "Wenn kein Kontext vorliegt, sage das explizit."
-        )
+        return f"""
+            You are a helpful assistant. Using all the provided context from multiple search hops, you must answer the original question.
+            If the context is not sufficient, state that you cannot answer the question with the given information.
 
-        if not retrieval_trace:
-            context_block = "Keine Chunks vorhanden."
-        else:
-            lines = []
-            for item in retrieval_trace:
-                chunk_id = item.get("id", "chunk")
-                title = item.get("title") or "Ohne Titel"
-                score = item.get("score")
-                score_str = f"{score:.3f}" if isinstance(score, (int, float)) else str(score)
-                preview = item.get("preview") or item.get("content", "")
-                preview = preview.replace("\n", " ")
-                lines.append(f"[{chunk_id}] (score={score_str}) {title} :: {preview}")
-            context_block = "\n".join(lines)
+            Original Question: {initial_query}
 
-        user_content = (
-            f"Frage: {question}\n\n"
-            "Kontext-Chunks:\n"
-            f"{context_block}\n\n"
-            "Aufgabe:\n"
-            "- Antworte knapp basierend auf den Chunks.\n"
-            "- Liste danach die genutzten Chunk-IDs und warum sie relevant sind.\n"
-            "- Formatiere so:\n"
-            "Antwort: ...\n"
-            "Begründung:\n"
-            "- [chunk-1] Titel: Grund\n"
-            "- [chunk-2] Titel: Grund\n"
-        )
-        if answer_guidance:
-            user_content += f"\nHinweis: {answer_guidance}"
+            Full Context from all search hops:
+            {context}
 
-        return [
-            SystemMessage(content=system_content),
-            HumanMessage(content=user_content),
-        ]
+            {extra}
+            Final Answer:
+            """

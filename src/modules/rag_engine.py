@@ -11,15 +11,13 @@ class RAGEngine:
     def __init__(self, persist_dir: str = "../data/vector_db"):
         self.persist_dir = persist_dir
         
-        # Best local embedding model for general RAG (fast & standard)
-        # You can swap this for OllamaEmbeddings if you want 100% Ollama
         self.embedding_model = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
         self._vectorstore = None
         self._retriever = None
 
-    def setup(self, documents: Optional[List[Document]] = None, reset: bool = False):
+    def setup(self, documents: Optional[List[Document]] = None, reset: bool = False, k_documents: int = 4):
         """
         Initializes the vector store.
         If 'documents' are provided and DB is empty (or reset=True), it ingests them.
@@ -50,7 +48,7 @@ class RAGEngine:
         # Initialize the retriever interface
         self._retriever = self._vectorstore.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": 4} # Adjust 'k' based on HotpotQA needs
+            search_kwargs={"k": k_documents} # Adjust 'k' based on HotpotQA needs
         )
         print("RagEngine ready.")
 

@@ -1,5 +1,6 @@
 import json
 import requests
+import pyarrow
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from langchain_core.documents import Document

@@ -5,6 +5,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
+
 
 class LLMClient:
     def __init__(self, provider: str = "ollama", model_name: str = "llama3"):
@@ -27,7 +29,18 @@ class LLMClient:
                 model=self.model_name,
                 temperature=0  # Deterministic for explainability experiments
             )
-        
+        elif self.provider == "groq":
+            print(f"Connecting to Groq ({self.model_name})...")
+            api_key = os.getenv("GROQ_API_KEY")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY environment variable not set.")
+
+            self._llm = ChatGroq(
+                model=self.model_name,
+                temperature=0,
+                groq_api_key=api_key,
+            )
+
         elif self.provider == "openai":
             print(f"Connecting to OpenAI ({self.model_name})...")
             api_key = os.getenv("OPENAI_API_KEY")

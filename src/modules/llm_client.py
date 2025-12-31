@@ -41,11 +41,11 @@ class LLMClient:
             )
         elif self.provider == "groq":
             print(f"Connecting to Groq ({self.model_name})...")
-            api_key = os.getenv("GROQ_API_KEY")
+            api_key = "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"
             if not api_key:
                 raise ValueError("GROQ_API_KEY environment variable not set.")
 
-            self._llm = ChatGroq(
+            self._base_llm = ChatGroq(
                 model=self.model_name,
                 temperature=0,
                 groq_api_key=api_key,

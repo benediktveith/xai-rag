@@ -1,46 +1,90 @@
+# src/modules/kg_perturbation_factory.py
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from src.modules.kg_schema import KGStep
+from src.modules.kg_path_service import PathAsLists
 
 
 @dataclass(frozen=True)
-class Perturbation:
-    kind: str
+class ChainPerturbation:
+    """
+    Paper-nah:
+    Wir perturbieren die Relation-Chain Darstellung (mit "__" Platzhalter),
+    nicht den Graph strukturell, und lassen das LLM daraus einen Pseudoparagraphen generieren.
+    """
+    kind: str  # "node" | "edge" | "subpath"
     removed: str
-    path: List[KGStep]
+    chain_str: str
+    important_entities: List[str]
 
 
 class KGPerturbationFactory:
-    def node_perturbations(self, path: List[KGStep]) -> List[Perturbation]:
-        nodes = []
-        for s in path:
-            nodes.append(s.subject)
-            nodes.append(s.object)
-        uniq = []
-        for n in nodes:
-            if n not in uniq:
-                uniq.append(n)
+    def generate(self, path_lists: PathAsLists) -> List[ChainPerturbation]:
+        if not path_lists.node_list or not path_lists.edge_list:
+            return []
 
-        out: List[Perturbation] = []
-        for n in uniq:
-            new_path = [s for s in path if s.subject != n and s.object != n]
-            out.append(Perturbation(kind="node", removed=n, path=new_path))
-        return out
+        node_list = path_lists.node_list
+        edge_list = path_lists.edge_list
+        subpath_list = path_lists.subpath_list
 
-    def edge_perturbations(self, path: List[KGStep]) -> List[Perturbation]:
-        out: List[Perturbation] = []
-        for s in path:
-            key = f"{s.subject}::{s.relation}::{s.object}"
-            new_path = [x for x in path if f"{x.subject}::{x.relation}::{x.object}" != key]
-            out.append(Perturbation(kind="edge", removed=key, path=new_path))
-        return out
+        out: List[ChainPerturbation] = []
 
-    def subpath_perturbations(self, path: List[KGStep]) -> List[Perturbation]:
-        out: List[Perturbation] = []
-        for i, s in enumerate(path):
-            removed = f"({s.subject}, {s.relation}, {s.object})"
-            new_path = path[:i] + path[i + 1 :]
-            out.append(Perturbation(kind="subpath", removed=removed, path=new_path))
+        # Node perturbations: replace node with "__" in node_list, then reconstruct chain
+        for i in range(len(node_list)):
+            pert_nodes = node_list[:i] + ["__"] + node_list[i + 1 :]
+            chain = ""
+            for j in range(len(pert_nodes) - 1):
+                chain += f"{pert_nodes[j]}->[{edge_list[j]}]->"
+            chain += pert_nodes[-1]
+            out.append(
+                ChainPerturbation(
+                    kind="node",
+                    removed=node_list[i],
+                    chain_str=chain,
+                    important_entities=[node_list[i]],
+                )
+            )
+
+        # Edge perturbations: replace edge relation with "__"
+        for i in range(len(edge_list)):
+            pert_edges = edge_list[:i] + ["__"] + edge_list[i + 1 :]
+            chain = ""
+            for j in range(len(node_list) - 1):
+                chain += f"{node_list[j]}->[{pert_edges[j]}]->"
+            chain += node_list[-1]
+            removed = f"{node_list[i]}::{edge_list[i]}::{node_list[i+1]}"
+            out.append(
+                ChainPerturbation(
+                    kind="edge",
+                    removed=removed,
+                    chain_str=chain,
+                    important_entities=[node_list[i], node_list[i + 1]],
+                )
+            )
+
+        # Subpath perturbations: replace one triple (u, rel, v) with "__" markers in chain
+        for i, (u, rel, v) in enumerate(subpath_list):
+            pert_nodes = node_list[:]
+            pert_edges = edge_list[:]
+            # In chain representation, removing subpath is best approximated by blanking both endpoints and relation
+            pert_nodes[i] = "__"
+            pert_edges[i] = "__"
+            pert_nodes[i + 1] = "__"
+
+            chain = ""
+            for j in range(len(pert_nodes) - 1):
+                chain += f"{pert_nodes[j]}->[{pert_edges[j]}]->"
+            chain += pert_nodes[-1]
+
+            out.append(
+                ChainPerturbation(
+                    kind="subpath",
+                    removed=f"({u}, {rel}, {v})",
+                    chain_str=chain,
+                    important_entities=[u, v],
+                )
+            )
+
         return out

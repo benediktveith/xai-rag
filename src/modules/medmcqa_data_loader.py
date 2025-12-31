@@ -98,28 +98,67 @@ class MedMCQADataLoader:
         return data
 
 
-    def _to_documents(self, data: List[Dict[str, Any]], split: str) -> List[Document]:
-        docs: List[Document] = []
+    def _to_documents(self, data, split: str):
+        from langchain_core.documents import Document
+
+        def cop_to_letter(cop):
+            if isinstance(cop, int):
+                return {1: "A", 2: "B", 3: "C", 4: "D"}.get(cop)
+            if isinstance(cop, str):
+                c = cop.strip().upper()
+                if c in {"A", "B", "C", "D"}:
+                    return c
+            return None
+
+        docs = []
         for idx, item in enumerate(data):
             question = str(item.get("question", "")).strip()
+            exp = str(item.get("exp", "")).strip()
 
-            options = item.get("options")
-            if isinstance(options, dict) and options:
-                options_text = " ".join(str(v) for v in options.values() if v)
-            else:
-                options_text = ""
+            opa = str(item.get("opa", "")).strip()
+            opb = str(item.get("opb", "")).strip()
+            opc = str(item.get("opc", "")).strip()
+            opd = str(item.get("opd", "")).strip()
 
-            answer = item.get("answer", item.get("correct", None))
+            options_lines = []
+            if opa: options_lines.append(f"A: {opa}")
+            if opb: options_lines.append(f"B: {opb}")
+            if opc: options_lines.append(f"C: {opc}")
+            if opd: options_lines.append(f"D: {opd}")
+
+            options_block = "\n".join(options_lines).strip()
+
+            content_parts = []
+            if question:
+                content_parts.append(question)
+            if options_block:
+                content_parts.append(options_block)
+
+            if exp:
+                content_parts.append(f"Explanation: {exp}")
+
+            page_content = "\n\n".join(content_parts).strip()
+            if not page_content:
+                continue
+
+            cop = item.get("cop", None)
+            gold = cop_to_letter(cop)
 
             doc = Document(
-                page_content=options_text,
+                page_content=page_content,
                 metadata={
                     "question_id": item.get("id", idx),
                     "question": question,
-                    "answer": answer,
+                    "answer": gold,         # A/B/C/D
+                    "cop_raw": cop,         # original
                     "split": split,
                     "source": "medmcqa",
+                    "subject_name": item.get("subject_name", None),
+                    "topic_name": item.get("topic_name", None),
+                    "choice_type": item.get("choice_type", None),
                 },
             )
             docs.append(doc)
+
         return docs
+

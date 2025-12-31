@@ -24,7 +24,17 @@ class KGRAGGraphMetrics:
     def compute_global_metrics(self) -> None:
         if self._computed:
             return
-        self._edge_betweenness = nx.edge_betweenness_centrality(self.kg.g)
+        raw = nx.edge_betweenness_centrality(self.kg.g)
+        merged: Dict[Tuple[str, str], float] = {}
+        for key, val in raw.items():
+            if isinstance(key, tuple) and len(key) == 3:
+                u, v, _k = key
+            else:
+                u, v = key
+            prev = merged.get((u, v), 0.0)
+            if float(val) > prev:
+                merged[(u, v)] = float(val)
+        self._edge_betweenness = merged
         self._computed = True
 
     def node_degree(self, node: str) -> int:

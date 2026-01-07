@@ -1,12 +1,16 @@
 import json
+import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.documents import Document
 
+import tomllib
 
 class MedMCQADataLoader:
     """
+    Dateien sind hier: https://github.com/medmcqa/medmcqa?tab=readme-ov-file
+    
     Loader für lokal abgelegte MedMCQA Dateien.
     Unterstützt JSON und JSONL.
 
@@ -39,11 +43,24 @@ class MedMCQADataLoader:
         if split == "val":
             split = "dev"
 
+        config = self._load_config()
+        config_medmcqa = config.get("medmcqa", {}) if isinstance(config.get("medmcqa"), dict) else {}
+
+        seed = self._coerce_int(
+            config_medmcqa.get("seed")
+        )
+
+        if limit is None:
+            limit = self._coerce_int(
+                config_medmcqa.get("n_qa_questions")
+            )
+
         path = self._find_split_file(split)
         data = self._load(path, cache_key=split)
 
         if limit is not None:
-            data = data[:limit]
+            limit = max(0, int(limit))
+            data = self._select_with_seed(data, limit, int(seed))
 
         if as_documents:
             return self._to_documents(data, split)
@@ -97,6 +114,31 @@ class MedMCQADataLoader:
         self._cache[cache_key] = data
         return data
 
+    def _load_config(self) -> Dict[str, Any]:
+        config_path = self.PROJECT_ROOT / "config.toml"
+        
+        if not config_path.exists():
+            return {}
+        if tomllib is None:
+            raise RuntimeError("tomllib is required to load config.toml (Python 3.11+).")
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)
+
+    def _coerce_int(self, value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _select_with_seed(self, data: List[Dict[str, Any]], limit: int, seed: int) -> List[Dict[str, Any]]:
+        if limit >= len(data):
+            return list(data)
+        indices = list(range(len(data)))
+        random.Random(seed).shuffle(indices)
+        indices = indices[:limit]
+        return [data[i] for i in indices]
 
     def _to_documents(self, data, split: str):
         from langchain_core.documents import Document

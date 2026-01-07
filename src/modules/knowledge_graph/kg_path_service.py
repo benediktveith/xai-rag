@@ -1,13 +1,12 @@
 # src/modules/kg_path_service.py
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import networkx as nx
 
-from src.modules.kg_schema import KGStep
-from src.modules.kg_store import KGStore
+from src.modules.knowledge_graph.kg_schema import KGStep
+from src.modules.knowledge_graph.kg_store import KGStore
 
 
 @dataclass(frozen=True)

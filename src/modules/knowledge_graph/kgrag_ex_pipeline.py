@@ -1,20 +1,17 @@
-# src/modules/kgrag_ex_pipeline.py
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from langchain_core.documents import Document
 
-from src.modules.rag_engine import RAGEngine
-from src.modules.llm_client import LLMClient
-from src.modules.kg_path_service import PathAsLists
+from src.modules.rag.rag_engine import RAGEngine
+from src.modules.llm.llm_client import LLMClient
+from src.modules.knowledge_graph.kg_path_service import PathAsLists
 
 
-from src.modules.kg_store import KGStore
-from src.modules.kg_query_service import KGQueryService
-from src.modules.kg_path_service import KGPathService
-from src.modules.kg_schema import KGStep
+from src.modules.knowledge_graph.kg_store import KGStore
+from src.modules.knowledge_graph.kg_query_service import KGQueryService
+from src.modules.knowledge_graph.kg_path_service import KGPathService
+from src.modules.knowledge_graph.kg_schema import KGStep
 
 
 @dataclass

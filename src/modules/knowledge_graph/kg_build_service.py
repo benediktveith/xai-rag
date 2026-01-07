@@ -1,15 +1,13 @@
 # src/modules/kg_build_service.py
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from langchain_core.documents import Document
 
-from src.modules.kg_schema import KGTriple
-from src.modules.kg_store import KGStore
-from src.modules.kg_triplet_extractor import KGTripletExtractor
+from src.modules.knowledge_graph.kg_schema import KGTriple
+from src.modules.knowledge_graph.kg_store import KGStore
+from src.modules.knowledge_graph.kg_triplet_extractor import KGTripletExtractor
 
 
 @dataclass(frozen=True)

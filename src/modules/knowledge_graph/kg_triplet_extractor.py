@@ -1,14 +1,11 @@
-# src/modules/kg_triplet_extractor.py
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Set, Tuple, Optional
 
 import re
 from langchain_core.documents import Document
 
-from src.modules.kg_schema import KGTriple
-from src.modules.llm_client import LLMClient
+from src.modules.knowledge_graph.kg_schema import KGTriple
+from src.modules.llm.llm_client import LLMClient
 
 
 EntityType = Literal[

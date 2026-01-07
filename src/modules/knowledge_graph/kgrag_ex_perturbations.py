@@ -1,10 +1,7 @@
-# src/modules/kg_perturbation_factory.py
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from src.modules.kg_path_service import PathAsLists
+from src.modules.knowledge_graph.kg_path_service import PathAsLists
 
 
 @dataclass(frozen=True)

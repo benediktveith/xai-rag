@@ -9,9 +9,9 @@ import re
 import difflib
 import networkx as nx
 
-from src.modules.kg_store import KGStore
-from src.modules.llm_client import LLMClient
-from src.modules.llm_json import LLMJSON
+from src.modules.knowledge_graph.kg_store import KGStore
+from src.modules.llm.llm_client import LLMClient
+from src.modules.llm.llm_json import LLMJSON
 
 
 @dataclass(frozen=True)

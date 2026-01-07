@@ -1,5 +1,3 @@
-# src/modules/kg_store.py
-from __future__ import annotations
 
 import json
 import re
@@ -8,7 +6,7 @@ from typing import Dict, Iterable, List, Any, Optional
 
 import networkx as nx
 
-from src.modules.kg_schema import KGTriple
+from src.modules.knowledge_graph.kg_schema import KGTriple
 
 
 _WS = re.compile(r"\s+")

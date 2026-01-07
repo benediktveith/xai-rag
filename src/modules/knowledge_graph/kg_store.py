@@ -1,13 +1,11 @@
-
 import json
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Any, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import networkx as nx
 
 from src.modules.knowledge_graph.kg_schema import KGTriple
-
 
 _WS = re.compile(r"\s+")
 
@@ -36,14 +34,14 @@ def _dedup_preserve_order(xs: List[str]) -> List[str]:
 
 class KGStore:
     """
-    KG Store als DiGraph.
+    KG Store als MultiDiGraph.
 
-    - Eine Kante pro (u, v). Relation Mixing wird verhindert.
+    - Eine Kante pro (u, v, relation_key), verhindert Relation Mixing.
     - Observations sind die kanonische Quelle fuer alles.
     """
 
     def __init__(self):
-        self.g = nx.DiGraph()
+        self.g = nx.MultiDiGraph()
         self._alias_by_canon: Dict[str, str] = {}
 
     def _resolve_node_id(self, name: str) -> str:
@@ -79,31 +77,35 @@ class KGStore:
 
         return nid
 
-    def _pick_primary_relation(self, observations: List[Dict[str, Any]]) -> str:
-        for obs in observations:
-            meta = obs.get("meta") if isinstance(obs.get("meta"), dict) else {}
-            if not bool(meta.get("synthetic", False)):
-                return str(obs.get("relation", "") or "")
-        return str(observations[0].get("relation", "") or "") if observations else ""
-    
     def node_name(self, node: str) -> str:
-        """
-        Stabiler Display Name. Da wir node ids als kanonisierte Raw Strings halten,
-        ist der Knotenname identisch zur Node ID.
-        """
         return str(node or "")
 
-    def edge_attr(self, u: str, v: str) -> Optional[dict]:
+    def node_type(self, node: str) -> str:
+        return str(self.g.nodes[node].get("type", "Unknown"))
+
+    def edge_attr(self, u: str, v: str, relation_key: Optional[str] = None) -> Optional[dict]:
         """
-        Gibt die Edge Attribute für (u,v) zurück, oder None falls keine Kante existiert.
+        Gibt Edge Attribute zurück.
+        - Wenn relation_key None: gibt die erste Kante (beliebig) zurück, falls vorhanden.
+        - Wenn relation_key gesetzt: gibt genau diese Kante zurück.
         """
         if not u or not v:
             return None
-        if not self.g.has_edge(u, v):
-            return None
-        data = self.g.get_edge_data(u, v) or {}
-        return dict(data)
+        if relation_key is None:
+            if not self.g.has_edge(u, v):
+                return None
+            data = self.g.get_edge_data(u, v) or {}
+            if not data:
+                return None
+            first_key = next(iter(data.keys()))
+            return dict(data[first_key] or {})
+        else:
+            if not self.g.has_edge(u, v, key=relation_key):
+                return None
+            return dict(self.g.get_edge_data(u, v, relation_key) or {})
 
+    def stats(self) -> Dict[str, int]:
+        return {"nodes": self.g.number_of_nodes(), "edges": self.g.number_of_edges()}
 
     def add_triples(self, triples: Iterable[KGTriple]) -> None:
         for t in triples:
@@ -122,15 +124,10 @@ class KGStore:
 
             obs = {"relation": rel, "source": src, "chunk_id": cid, "meta": meta}
 
-            if self.g.has_edge(u, v):
-                data = dict(self.g.get_edge_data(u, v) or {})
-                existing_rel = str(data.get("relation", "") or "")
+            key = rel  # Relation als Edge-Key, verhindert Mixing
 
-                if existing_rel and existing_rel != rel:
-                    conflicts = data.get("relation_conflicts") or []
-                    conflicts.append(obs)
-                    self.g[u][v].update({"relation_conflicts": conflicts})
-                    continue
+            if self.g.has_edge(u, v, key=key):
+                data = dict(self.g.get_edge_data(u, v, key) or {})
 
                 observations = list(data.get("observations") or [])
                 observations.append(obs)
@@ -145,44 +142,30 @@ class KGStore:
                 sources = _dedup_preserve_order(sources)
                 chunk_ids = _dedup_preserve_order(chunk_ids)
 
-                primary = self._pick_primary_relation(observations)
-
-                self.g[u][v].update(
+                self.g[u][v][key].update(
                     {
-                        "relation": primary,
+                        "relation": rel,
                         "observations": observations,
                         "sources": sources,
                         "chunk_ids": chunk_ids,
                     }
                 )
             else:
-                observations = [obs]
-                sources = [src] if src else []
-                chunk_ids = [cid] if cid else []
-                primary = self._pick_primary_relation(observations)
-
                 self.g.add_edge(
                     u,
                     v,
-                    relation=primary,
-                    observations=observations,
-                    sources=sources,
-                    chunk_ids=chunk_ids,
-                    relation_conflicts=[],
+                    key=key,
+                    relation=rel,
+                    observations=[obs],
+                    sources=[src] if src else [],
+                    chunk_ids=[cid] if cid else [],
                 )
-
-    def node_type(self, node: str) -> str:
-        return str(self.g.nodes[node].get("type", "Unknown"))
-
-    def stats(self) -> Dict[str, int]:
-        return {"nodes": self.g.number_of_nodes(), "edges": self.g.number_of_edges()}
 
     def save_jsonl(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            for u, v, data in self.g.edges(data=True):
+            for u, v, key, data in self.g.edges(keys=True, data=True):
                 observations = list(data.get("observations") or [])
-
                 relations = [str(o.get("relation", "") or "") for o in observations if o.get("relation")]
                 relations = _dedup_preserve_order([r for r in relations if r])
 
@@ -191,6 +174,7 @@ class KGStore:
                 rec = {
                     "u": u,
                     "v": v,
+                    "key": str(key),
                     "u_type": self.g.nodes[u].get("type", "Unknown"),
                     "v_type": self.g.nodes[v].get("type", "Unknown"),
                     "relation": str(data.get("relation", "") or ""),
@@ -198,8 +182,6 @@ class KGStore:
                     "sources": list(data.get("sources") or []),
                     "chunk_ids": list(data.get("chunk_ids") or []),
                     "metas": metas,
-                    # diagnostics and lossless payload
-                    "relation_conflicts": list(data.get("relation_conflicts") or []),
                     "observations": observations,
                 }
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -217,17 +199,16 @@ class KGStore:
                 if not u or not v:
                     continue
 
-                relation = str(rec.get("relation", "") or "")
+                key = str(rec.get("key", "") or rec.get("relation", "") or "")
+                relation = str(rec.get("relation", "") or key)
+
                 sources = list(rec.get("sources") or [])
                 chunk_ids = list(rec.get("chunk_ids") or [])
 
-                # Prefer lossless observations if present
                 observations = list(rec.get("observations") or [])
                 if not observations:
                     relations = list(rec.get("relations") or [])
                     metas = list(rec.get("metas") or [])
-
-                    # coarse fallback: attach first source/chunk_id if available
                     src0 = sources[0] if sources else ""
                     cid0 = chunk_ids[0] if chunk_ids else ""
 
@@ -235,7 +216,12 @@ class KGStore:
                     if relations and metas and len(relations) == len(metas):
                         for r, m in zip(relations, metas):
                             observations.append(
-                                {"relation": str(r), "source": src0, "chunk_id": cid0, "meta": m if isinstance(m, dict) else {}}
+                                {
+                                    "relation": str(r),
+                                    "source": src0,
+                                    "chunk_id": cid0,
+                                    "meta": m if isinstance(m, dict) else {},
+                                }
                             )
                     else:
                         for m in metas:
@@ -243,15 +229,15 @@ class KGStore:
                                 {"relation": relation, "source": src0, "chunk_id": cid0, "meta": m if isinstance(m, dict) else {}}
                             )
 
-                if not relation:
-                    relation = self._pick_primary_relation(observations)
+                if not key:
+                    key = relation
 
                 self.g.add_edge(
                     u,
                     v,
+                    key=key,
                     relation=relation,
                     observations=observations,
                     sources=sources,
                     chunk_ids=chunk_ids,
-                    relation_conflicts=list(rec.get("relation_conflicts") or []),
                 )

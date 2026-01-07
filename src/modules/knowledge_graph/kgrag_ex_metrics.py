@@ -23,16 +23,22 @@ class KGRAGGraphMetrics:
     def compute_global_metrics(self) -> None:
         if self._computed:
             return
-        raw = nx.edge_betweenness_centrality(self.kg.g)
+
+        G = self.kg.g.to_undirected()
+        raw = nx.edge_betweenness_centrality(G)
+
         merged: Dict[Tuple[str, str], float] = {}
         for key, val in raw.items():
             if isinstance(key, tuple) and len(key) == 3:
                 u, v, _k = key
             else:
                 u, v = key
-            prev = merged.get((u, v), 0.0)
+
+            a, b = (u, v) if str(u) <= str(v) else (v, u)
+            prev = merged.get((str(a), str(b)), 0.0)
             if float(val) > prev:
-                merged[(u, v)] = float(val)
+                merged[(str(a), str(b))] = float(val)
+
         self._edge_betweenness = merged
         self._computed = True
 

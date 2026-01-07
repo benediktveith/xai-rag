@@ -224,17 +224,27 @@ class KGRAGExExplainer:
         if self._edge_betweenness_cache is not None:
             return self._edge_betweenness_cache
 
-        G = self.pipeline.kg.g.to_undirected()  # paper uses shortest paths, undirected view is fine for centrality
-        if self.betweenness_k and self.betweenness_k > 0:
-            eb = nx.edge_betweenness_centrality(G, k=self.betweenness_k, seed=self.betweenness_seed)
-        else:
-            eb = nx.edge_betweenness_centrality(G)
+        G = self.pipeline.kg.g.to_undirected()
 
-        # normalize keys to (u,v) where u < v for stable lookup
+        if self.betweenness_k and self.betweenness_k > 0:
+            eb_raw = nx.edge_betweenness_centrality(G, k=self.betweenness_k, seed=self.betweenness_seed)
+        else:
+            eb_raw = nx.edge_betweenness_centrality(G)
+
         out: Dict[Tuple[str, str], float] = {}
-        for (u, v), val in eb.items():
+
+        for key, val in eb_raw.items():
+            if isinstance(key, tuple) and len(key) == 3:
+                u, v, _k = key
+            else:
+                u, v = key
+
             a, b = (u, v) if str(u) <= str(v) else (v, u)
-            out[(str(a), str(b))] = float(val)
+            kk = (str(a), str(b))
+            prev = out.get(kk, 0.0)
+            if float(val) > prev:
+                out[kk] = float(val)
+
         self._edge_betweenness_cache = out
         return out
 

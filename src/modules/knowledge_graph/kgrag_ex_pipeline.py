@@ -287,20 +287,44 @@ No line breaks.
         gold_answer: Optional[str],
         entity_k: int = 6,
         top_k_docs: int = 4,
+        kg_chain_variants: int = 6,
+        kg_per_hop_top_n: int = 2,
     ) -> KGRAGRun:
         qents = self.query.extract_entities(question, k=entity_k).entities
         pair = self.query.pick_pair_with_path(qents)
-        print(pair)
         start, end = (pair if pair else (None, None))
 
         path_steps: List[KGStep] = []
-        if start and end:
-            path_steps = self.path.shortest_path(start, end)
+        path_lists = PathAsLists(node_list=[], edge_list=[], subpath_list=[], chain_str="")
 
-        path_lists = self._steps_to_path_as_lists(path_steps)
-        print(path_lists)
+        if start and end:
+            if int(kg_chain_variants) > 1:
+                variants = self.path.shortest_path_variants(
+                    start,
+                    end,
+                    per_hop_top_n=int(kg_per_hop_top_n),
+                    max_chains=int(kg_chain_variants),
+                )
+                # fallback
+                if variants:
+                    best = None
+                    best_score = None
+                    for v in variants:
+                        q = f"{question}\n\nSupporting KG context:\n{v.chain_str}"
+                        docs = self._retrieve_with_scores(q, k=1)
+                        s = float(docs[0][1]) if docs else 0.0
+                        if best_score is None or s > best_score:
+                            best_score = s
+                            best = v
+                    path_lists = best if best is not None else variants[0]
+                else:
+                    path_steps = self.path.shortest_path(start, end)
+                    path_lists = self._steps_to_path_as_lists(path_steps)
+            else:
+                path_steps = self.path.shortest_path(start, end)
+                path_lists = self._steps_to_path_as_lists(path_steps)
+
         kg_chain = self._path_as_chain_str(path_lists)
-        print(kg_chain)
 
         kg_paragraph = ""
         calls_para = 0

@@ -1,12 +1,14 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Set, Tuple, Optional
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 import re
+from pydantic import BaseModel, Field
+
 from langchain_core.documents import Document
 
 from src.modules.knowledge_graph.kg_schema import KGTriple
 from src.modules.llm.llm_client import LLMClient
-
+from src.modules.knowledge_graph.relation_registry import RelationRegistry, ProposedRelation, canon_relation
 
 EntityType = Literal[
     "Disease",
@@ -33,7 +35,41 @@ _ALLOWED_LABELS: Set[str] = {
     "Procedures",
 }
 
-_ALLOWED_RELATIONS: Set[str] = {
+_LABEL_TO_TYPE: Dict[str, EntityType] = {
+    "Diseases": "Disease",
+    "Medications": "Medication",
+    "Symptoms": "Symptom",
+    "Treatments": "Treatment",
+    "Diagnostic Tests": "DiagnosticTest",
+    "Risk Factors": "RiskFactor",
+    "Body Parts": "BodyPart",
+    "Procedures": "Procedure",
+}
+
+_WS = re.compile(r"\s+")
+_HAS_SENTENCE_PUNCT = re.compile(r"[.!?]")
+_MULTI_PUNCT = re.compile(r"[;,]{1,}")
+
+_BAD_SINGLE = {"A", "B", "C", "D"}
+
+_MAX_ENTITY_TOKENS = 12
+_MAX_ENTITY_CHARS = 100
+
+_BAD_ENTITY_PATTERNS = [
+    r"\bpatients?\b",
+    r"\bwho\b",
+    r"\bwhich\b",
+    r"\bthat\b",
+    r"\bundergoing\b",
+    r"\bas part of\b",
+    r"\bevaluation of\b",
+    r"\bin order to\b",
+    r"\bresult(s)? in\b",
+    r"\blead(s)? to\b",
+]
+
+# Relations, die du initial als Startset geben willst, du kannst das weiterhin zentral pflegen.
+_DEFAULT_ALLOWED_RELATIONS: Set[str] = {
     "HAS_SYMPTOM",
     "AFFECTS",
     "DIAGNOSED_BY",
@@ -55,17 +91,7 @@ _ALLOWED_RELATIONS: Set[str] = {
     "CAN_AFFECT",
 }
 
-_LABEL_TO_TYPE: Dict[str, EntityType] = {
-    "Diseases": "Disease",
-    "Medications": "Medication",
-    "Symptoms": "Symptom",
-    "Treatments": "Treatment",
-    "Diagnostic Tests": "DiagnosticTest",
-    "Risk Factors": "RiskFactor",
-    "Body Parts": "BodyPart",
-    "Procedures": "Procedure",
-}
-
+# Optional, einfache Typprüfung, kann später erweitert werden.
 _REL_LABEL_RULES: Dict[str, Dict[str, Any]] = {
     "HAS_SYMPTOM": {"sub": {"Diseases"}, "obj": {"Symptoms"}, "swappable": True},
     "HAS_RISK_FACTOR": {"sub": {"Diseases"}, "obj": {"Risk Factors"}, "swappable": True},
@@ -80,37 +106,6 @@ _REL_LABEL_RULES: Dict[str, Dict[str, Any]] = {
     "COMORBID_WITH": {"sub": {"Diseases"}, "obj": {"Diseases"}, "swappable": False},
     "PART_OF": {"sub": {"Body Parts"}, "obj": {"Body Parts"}, "swappable": False},
 }
-
-_BAD_SINGLE = {"A", "B", "C", "D"}
-_WS = re.compile(r"\s+")
-_PUNCT_REL = re.compile(r"[^a-z0-9\s_]")
-_ANSWER_LINE = re.compile(r"^\s*Answer\s*:\s*(.+?)\s*$", re.IGNORECASE)
-_SPLIT_COLON = re.compile(r"\s*:\s*")
-
-_MAX_ENTITY_TOKENS = 10
-_MAX_ENTITY_CHARS = 80
-_HAS_SENTENCE_PUNCT = re.compile(r"[.!?]")
-_MULTI_PUNCT = re.compile(r"[;,]{1,}")
-
-_BAD_ENTITY_PATTERNS = [
-    r"\bpatients?\b",
-    r"\bwho\b",
-    r"\bwhich\b",
-    r"\bthat\b",
-    r"\bundergoing\b",
-    r"\bas part of\b",
-    r"\bevaluation of\b",
-    r"\bin order to\b",
-    r"\bresult(s)? in\b",
-    r"\blead(s)? to\b",
-]
-
-
-@dataclass
-class TripletExtractionResult:
-    triples: List[KGTriple]
-    raw: str
-    parsed: Dict[str, Any]
 
 
 def _norm_text(s: str) -> str:
@@ -131,24 +126,18 @@ def _looks_like_sentence_fragment(s: str) -> bool:
     t = _norm_text(s)
     if not t:
         return True
-
     if len(t) > _MAX_ENTITY_CHARS:
         return True
-
     if _token_count(t) > _MAX_ENTITY_TOKENS:
         return True
-
     if _HAS_SENTENCE_PUNCT.search(t):
         return True
-
     if _MULTI_PUNCT.search(t):
         return True
-
     low = t.lower()
     for p in _BAD_ENTITY_PATTERNS:
         if re.search(p, low):
             return True
-
     return False
 
 
@@ -176,12 +165,6 @@ def _clean_entity(ent: str) -> str:
     e = _norm_text(e)
     e = e.strip(" ,;:")
     return e
-
-
-def _rel_to_snake(rel: str) -> str:
-    r = _norm_text(rel).upper()
-    r = r.replace(" ", "_")
-    return r.lower()
 
 
 def _strip_mc_options(text: str) -> str:
@@ -243,14 +226,6 @@ def _extract_evidence_span(text: str, e1: str, e2: str, max_words: int = 25) -> 
     return " ".join(snippet_words).strip()
 
 
-def _clean_relation(rel: str) -> str:
-    r = _norm_text(rel).lower()
-    r = _PUNCT_REL.sub(" ", r)
-    r = _WS.sub(" ", r).strip()
-    r = r.replace(" ", "_")
-    return r
-
-
 def _validate_or_swap_by_labels(
     e1: str,
     l1: str,
@@ -276,14 +251,62 @@ def _validate_or_swap_by_labels(
     return None
 
 
+class ProposedRelationOut(BaseModel):
+    name: str = Field(..., description="Neue Relation in UPPER_SNAKE_CASE, z.B. ASSOCIATED_WITH")
+    description: str = Field("", description="Kurzbeschreibung der Semantik")
+    subject_labels: Optional[List[str]] = Field(default=None, description="Optional, z.B. ['Diseases']")
+    object_labels: Optional[List[str]] = Field(default=None, description="Optional, z.B. ['Symptoms']")
+    symmetric: Optional[bool] = Field(default=False, description="True wenn symmetrisch")
+
+
+class ExtractedTripleOut(BaseModel):
+    subject: str
+    subject_label: str
+    relation: str
+    object: str
+    object_label: str
+
+
+class KGExtractionOutput(BaseModel):
+    triples: List[ExtractedTripleOut] = Field(default_factory=list)
+    new_relations: List[ProposedRelationOut] = Field(default_factory=list)
+    notes: Optional[str] = None
+
+
+@dataclass
+class TripletExtractionResult:
+    triples: List[KGTriple]
+    raw: str
+    parsed: Dict[str, Any]
+
+
 class KGTripletExtractor:
     """
-    Repo style extraction.
+    Tripel-Extractor mit:
+    - dynamischem RelationRegistry Set
+    - strukturiertem Output via with_structured_output
     """
 
-    def __init__(self, llm_client: LLMClient, max_retries: int = 2):
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        relation_registry: RelationRegistry,
+        max_retries: int = 1,
+        max_new_relations_per_chunk: int = 3,
+        auto_accept_new_relations: bool = True,
+        alias_threshold: float = 0.88,
+    ):
         self.llm_client = llm_client
+        self.registry = relation_registry
         self.max_retries = max(0, int(max_retries))
+        self.max_new_relations_per_chunk = max(0, int(max_new_relations_per_chunk))
+        self.auto_accept_new_relations = bool(auto_accept_new_relations)
+        self.alias_threshold = float(alias_threshold)
+
+        # seed defaults if registry empty
+        if not self.registry.allowed:
+            for r in _DEFAULT_ALLOWED_RELATIONS:
+                self.registry.accept(r)
 
     def _prompt(self, doc: Document, chunk_id: str, source: str) -> str:
         raw = (doc.page_content or "").strip()
@@ -294,39 +317,33 @@ class KGTripletExtractor:
         text = _strip_mc_options(raw)
 
         labels = "\n".join([f"- {x}" for x in sorted(_ALLOWED_LABELS)])
-        rels = "\n".join([f"- {x}" for x in sorted(_ALLOWED_RELATIONS)])
+        rels = "\n".join([f"- {x}" for x in self.registry.snapshot_allowed_sorted()])
 
         return f"""
 You are an expert biomedical information extractor.
 
-Your task is to extract all valid Entity1, Relationship, Entity2 triples from the medical text below.
-Each triple must follow strict semantic and formatting rules.
+Extract knowledge graph triples from the medical text.
 
 Valid Entity Types (Labels):
 {labels}
 
-Valid Relationship Types:
+Allowed Relationship Types (Preferred):
 {rels}
 
-Instructions:
-1. Only extract triples where:
-   - Both Entity1 and Entity2 are explicitly mentioned in the input text.
-   - Both entities have a valid label from the list above.
-   - The relationship is one of the predefined types and is semantically correct.
-2. Only extract forward relationships.
-   - Do not include reverse or inverse relationships.
-3. Do not infer information not explicitly stated.
+Rules:
+1. Extract triples only if both entities are explicitly mentioned in the text.
+2. Prefer using an existing relation from the Allowed Relationship Types list.
+3. If none of the allowed relations fits semantically, propose a new relation.
+   - New relation must be UPPER_SNAKE_CASE, short, unambiguous.
+   - Provide a one sentence description.
 4. Avoid duplicates and redundant triples.
-5. Entities must be short noun phrases, not full sentences or clauses.
-   - Max 10 words and max 80 characters.
-   - Do not include punctuation like '.', ';', '?' inside entities.
-6. If no valid triples exist, return nothing.
+5. Entities must be short noun phrases, not full sentences.
+   - Max 12 words and max 100 characters.
+   - Do not include sentence punctuation inside entities.
+6. Do not infer facts not stated in the text.
+7. Propose at most {self.max_new_relations_per_chunk} new relations.
 
-Output format:
-- One triple per line.
-- Must begin with: Answer:
-- Format exactly like: Answer: Entity1 : Label1 : Relationship : Entity2 : Label2
-- No numbering and no extra text.
+Return strictly structured JSON according to the provided schema.
 
 Context:
 Title: {title}
@@ -338,58 +355,55 @@ Text:
 {text}
 """.strip()
 
-    def _parse_lines(self, raw: str) -> List[Tuple[str, str, str, str, str]]:
-        out: List[Tuple[str, str, str, str, str]] = []
-        if not raw:
-            return out
-
-        for line in raw.splitlines():
-            m = _ANSWER_LINE.match(line)
-            if not m:
-                continue
-
-            payload = m.group(1).strip()
-            parts = _SPLIT_COLON.split(payload)
-            if len(parts) != 5:
-                continue
-
-            e1, l1, rel, e2, l2 = [p.strip() for p in parts]
-            if not e1 or not l1 or not rel or not e2 or not l2:
-                continue
-
-            out.append((e1, l1, rel, e2, l2))
-
-        return out
-
     def _finalize(
         self,
-        tuples: List[Tuple[str, str, str, str, str]],
+        out: KGExtractionOutput,
         doc: Document,
         chunk_id: str,
         source: str,
     ) -> List[KGTriple]:
-        meta = doc.metadata or {}
+        meta0 = doc.metadata or {}
         text = (doc.page_content or "").strip()
+
+        # handle proposed relations
+        for pr in (out.new_relations or [])[: self.max_new_relations_per_chunk]:
+            proposed = ProposedRelation(
+                name=pr.name,
+                description=_norm_text(pr.description),
+                subject_labels=pr.subject_labels,
+                object_labels=pr.object_labels,
+                symmetric=bool(pr.symmetric or False),
+            )
+            cname = self.registry.propose(proposed, alias_threshold=self.alias_threshold)
+            if not cname:
+                continue
+            if self.auto_accept_new_relations:
+                # accept canonical, keep original as alias too
+                aliases = []
+                raw_name = canon_relation(pr.name)
+                if raw_name and raw_name != cname:
+                    aliases.append(raw_name)
+                self.registry.accept(cname, aliases=aliases)
 
         seen: Set[Tuple[str, str, str]] = set()
         triples: List[KGTriple] = []
 
-        for e1, l1, rel, e2, l2 in tuples:
-            e1c = _clean_entity(e1)
-            e2c = _clean_entity(e2)
-            l1c = _norm_text(l1)
-            l2c = _norm_text(l2)
-            rel_up = _norm_text(rel).upper()
-
-            if rel_up not in _ALLOWED_RELATIONS:
-                continue
+        for t in out.triples or []:
+            e1c = _clean_entity(t.subject)
+            e2c = _clean_entity(t.object)
+            l1c = _norm_text(t.subject_label)
+            l2c = _norm_text(t.object_label)
 
             if l1c not in _ALLOWED_LABELS or l2c not in _ALLOWED_LABELS:
                 continue
-
             if _is_bad_entity(e1c) or _is_bad_entity(e2c):
                 continue
             if e1c.lower() == e2c.lower():
+                continue
+
+            rel_canon = self.registry.resolve(t.relation)
+            rel_up = canon_relation(rel_canon)
+            if not rel_up:
                 continue
 
             checked = _validate_or_swap_by_labels(e1c, l1c, rel_up, e2c, l2c)
@@ -397,11 +411,7 @@ Text:
                 continue
             e1f, l1f, e2f, l2f = checked
 
-            rel_snake = _clean_relation(_rel_to_snake(rel_up))
-            if not rel_snake:
-                continue
-
-            key = (e1f.lower(), rel_snake, e2f.lower())
+            key = (e1f.lower(), rel_up, e2f.lower())
             if key in seen:
                 continue
             seen.add(key)
@@ -411,48 +421,59 @@ Text:
             triples.append(
                 KGTriple(
                     subject=e1f,
-                    relation=rel_snake,
+                    relation=rel_up,  # store canonical UPPER_SNAKE_CASE
                     object=e2f,
                     subject_type=_LABEL_TO_TYPE.get(l1f, "Other"),
                     object_type=_LABEL_TO_TYPE.get(l2f, "Other"),
                     source=source,
                     chunk_id=chunk_id,
                     meta={
-                        "title": meta.get("title", meta.get("topic_name", "")),
-                        "question_id": meta.get("question_id", ""),
-                        "source_filename": meta.get("source_filename", ""),
-                        "chunk_index": meta.get("chunk_index", None),
+                        "title": meta0.get("title", meta0.get("topic_name", "")),
+                        "question_id": meta0.get("question_id", ""),
+                        "source_filename": meta0.get("source_filename", ""),
+                        "chunk_index": meta0.get("chunk_index", None),
                         "evidence": ev,
                         "label_subject": l1f,
                         "label_object": l2f,
-                        "relation_raw": rel_up,
+                        "relation_raw": _norm_text(t.relation),
+                        "relation_canonical": rel_up,
+                        "relation_allowed_at_time": self.registry.is_allowed(rel_up),
                     },
                 )
             )
 
         return triples
 
-    def _extract_via_prompt(self, doc: Document, chunk_id: str, source: str) -> TripletExtractionResult:
+    def _extract_structured(self, doc: Document, chunk_id: str, source: str) -> TripletExtractionResult:
         llm = self.llm_client.get_llm()
         if llm is None:
             raise RuntimeError("LLMClient.get_llm() returned None")
+
+        structured_llm = llm.with_structured_output(KGExtractionOutput)
 
         last_raw = ""
         last_parsed: Dict[str, Any] = {}
 
         for _ in range(self.max_retries + 1):
             prompt = self._prompt(doc, chunk_id=chunk_id, source=source)
-            resp = llm.invoke(prompt)
-            raw = (getattr(resp, "content", str(resp)) or "").strip()
-            last_raw = raw
+            resp = structured_llm.invoke(prompt)
 
-            tuples = self._parse_lines(raw)
-            triples = self._finalize(tuples, doc=doc, chunk_id=chunk_id, source=source)
+            # LangChain gibt hier typischerweise schon ein Pydantic Objekt zurück
+            out: KGExtractionOutput
+            if isinstance(resp, KGExtractionOutput):
+                out = resp
+            else:
+                # Fallback, falls Provider raw dict zurückgibt
+                out = KGExtractionOutput.model_validate(resp)
 
+            last_parsed = out.model_dump()
+            last_raw = ""  # structured, kein Rohtext nötig
+
+            triples = self._finalize(out, doc=doc, chunk_id=chunk_id, source=source)
             if triples:
-                return TripletExtractionResult(triples=triples, raw=raw, parsed=last_parsed)
+                return TripletExtractionResult(triples=triples, raw=last_raw, parsed=last_parsed)
 
         return TripletExtractionResult(triples=[], raw=last_raw, parsed=last_parsed)
 
     def extract(self, doc: Document, chunk_id: str, source: str) -> TripletExtractionResult:
-        return self._extract_via_prompt(doc, chunk_id, source)
+        return self._extract_structured(doc, chunk_id, source)

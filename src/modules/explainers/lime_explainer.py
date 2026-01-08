@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from typing import Any, Dict, List, Tuple
 
-from .rag_engine import RAGEngine
+from ..rag.rag_engine import RAGEngine
 
 class LimeExplainer:
     """

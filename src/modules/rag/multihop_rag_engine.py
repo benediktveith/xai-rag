@@ -1,7 +1,7 @@
 from typing import Any, Dict, List
 from .rag_engine import RAGEngine
-from .llm_client import LLMClient
-from .cot_explainable import _format_documents
+from ..llm.llm_client import LLMClient
+from ..explainers.cot_explainable import _format_documents
 
 class MultiHopRAGEngine:
     """
@@ -58,6 +58,7 @@ class MultiHopRAGEngine:
             # For simplicity, we'll focus on the top document for the trace
             top_doc = retrieved_docs[0]
             lowest_doc = retrieved_docs[-1] # also track the lowest ranked document
+            context_docs = retrieved_docs[:min(4,len(retrieved_docs))]
             all_documents.append(top_doc)
 
             # 2. Store the results of this hop in our trace
@@ -65,12 +66,13 @@ class MultiHopRAGEngine:
                 "hop_number": hop_number,
                 "query_for_this_hop": current_query,
                 "retrieved_document_for_this_hop": top_doc,
-                "lowest_ranked_document" : lowest_doc       # added for comparison to low ranked documents
+                "lowest_ranked_document" : lowest_doc,       # added for comparison to low ranked documents
+                "documents_passed_to_context" : context_docs
             }
             trace["hops"].append(hop_info)
 
             # 3. Accumulate context for the next steps
-            context_so_far += f"\n\n {_format_documents([top_doc], current_query, hop_number)}"
+            context_so_far += f"\n\n {_format_documents([context_docs], current_query, hop_number)}"
 
             # 4. If not the last hop, generate the next query
             if i < self.num_hops - 1:

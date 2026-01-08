@@ -9,7 +9,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from .explainable_module import ExplainableModule
-from .llm_client import LLMClient
+from ..llm.llm_client import LLMClient
 
 class ReasoningStep(BaseModel):
     """Fine-grained reasoning step for explainable RAG."""

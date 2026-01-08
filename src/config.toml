@@ -1,0 +1,11 @@
+[medmcqa]
+seed = 42
+n_qa_questions = 50
+split = "val"
+
+[rag]
+n_hops = 2
+
+[llm]
+provider = "ollama"
+model = "gemma3:4b"

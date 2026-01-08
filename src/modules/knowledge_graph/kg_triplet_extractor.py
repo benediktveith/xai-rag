@@ -52,21 +52,9 @@ _MULTI_PUNCT = re.compile(r"[;,]{1,}")
 
 _BAD_SINGLE = {"A", "B", "C", "D"}
 
-_MAX_ENTITY_TOKENS = 12
+_MAX_ENTITY_TOKENS = 6
 _MAX_ENTITY_CHARS = 100
 
-_BAD_ENTITY_PATTERNS = [
-    r"\bpatients?\b",
-    r"\bwho\b",
-    r"\bwhich\b",
-    r"\bthat\b",
-    r"\bundergoing\b",
-    r"\bas part of\b",
-    r"\bevaluation of\b",
-    r"\bin order to\b",
-    r"\bresult(s)? in\b",
-    r"\blead(s)? to\b",
-]
 
 # Relations, die du initial als Startset geben willst, du kannst das weiterhin zentral pflegen.
 _DEFAULT_ALLOWED_RELATIONS: Set[str] = {
@@ -134,10 +122,6 @@ def _looks_like_sentence_fragment(s: str) -> bool:
         return True
     if _MULTI_PUNCT.search(t):
         return True
-    low = t.lower()
-    for p in _BAD_ENTITY_PATTERNS:
-        if re.search(p, low):
-            return True
     return False
 
 
@@ -292,14 +276,12 @@ class KGTripletExtractor:
         llm_client: LLMClient,
         relation_registry: RelationRegistry,
         max_retries: int = 1,
-        max_new_relations_per_chunk: int = 3,
         auto_accept_new_relations: bool = True,
         alias_threshold: float = 0.88,
     ):
         self.llm_client = llm_client
         self.registry = relation_registry
         self.max_retries = max(0, int(max_retries))
-        self.max_new_relations_per_chunk = max(0, int(max_new_relations_per_chunk))
         self.auto_accept_new_relations = bool(auto_accept_new_relations)
         self.alias_threshold = float(alias_threshold)
 
@@ -320,40 +302,43 @@ class KGTripletExtractor:
         rels = "\n".join([f"- {x}" for x in self.registry.snapshot_allowed_sorted()])
 
         return f"""
-You are an expert biomedical information extractor.
+                You are an expert biomedical information extractor.
 
-Extract knowledge graph triples from the medical text.
+                Extract knowledge graph triples from the medical text.
 
-Valid Entity Types (Labels):
-{labels}
+                Valid Entity Types (Labels):
+                {labels}
 
-Allowed Relationship Types (Preferred):
-{rels}
+                Allowed Relationship Types (Preferred):
+                {rels}
 
-Rules:
-1. Extract triples only if both entities are explicitly mentioned in the text.
-2. Prefer using an existing relation from the Allowed Relationship Types list.
-3. If none of the allowed relations fits semantically, propose a new relation.
-   - New relation must be UPPER_SNAKE_CASE, short, unambiguous.
-   - Provide a one sentence description.
-4. Avoid duplicates and redundant triples.
-5. Entities must be short noun phrases, not full sentences.
-   - Max 12 words and max 100 characters.
-   - Do not include sentence punctuation inside entities.
-6. Do not infer facts not stated in the text.
-7. Propose at most {self.max_new_relations_per_chunk} new relations.
+                Rules:
+                1. Extract triples only if both entities are explicitly mentioned in the text.
+                2. Prefer using an existing relation from the Allowed Relationship Types list.
+                3. If none of the allowed relations fits semantically, propose a new relation.
+                - New relation must be UPPER_SNAKE_CASE, short, unambiguous.
+                4. Avoid duplicates and redundant triples.
+                5. Entities must be short noun phrases, not full sentences.
+                - Max {_MAX_ENTITY_TOKENS} words.
+                - Do not include sentence punctuation inside entities.
+                6. Do not infer facts not stated in the text.
+                
+                Important:
+                - Only output complete triple objects. Do not output partial objects.
+                - If you cannot fill in a triple completely, omit it entirely.
 
-Return strictly structured JSON according to the provided schema.
+                Return strictly structured JSON according to the following schema:
+                {KGExtractionOutput.model_dump_json(indent=3)}
 
-Context:
-Title: {title}
-Source: {source}
-Source filename: {source_filename}
-Chunk ID: {chunk_id}
+                Context:
+                Title: {title}
+                Source: {source}
+                Source filename: {source_filename}
+                Chunk ID: {chunk_id}
 
-Text:
-{text}
-""".strip()
+                Text:
+                {text}
+                """
 
     def _finalize(
         self,
@@ -365,8 +350,7 @@ Text:
         meta0 = doc.metadata or {}
         text = (doc.page_content or "").strip()
 
-        # handle proposed relations
-        for pr in (out.new_relations or [])[: self.max_new_relations_per_chunk]:
+        for pr in (out.new_relations or []):
             proposed = ProposedRelation(
                 name=pr.name,
                 description=_norm_text(pr.description),
@@ -378,7 +362,6 @@ Text:
             if not cname:
                 continue
             if self.auto_accept_new_relations:
-                # accept canonical, keep original as alias too
                 aliases = []
                 raw_name = canon_relation(pr.name)
                 if raw_name and raw_name != cname:
@@ -458,16 +441,14 @@ Text:
             prompt = self._prompt(doc, chunk_id=chunk_id, source=source)
             resp = structured_llm.invoke(prompt)
 
-            # LangChain gibt hier typischerweise schon ein Pydantic Objekt zurück
             out: KGExtractionOutput
             if isinstance(resp, KGExtractionOutput):
                 out = resp
             else:
-                # Fallback, falls Provider raw dict zurückgibt
                 out = KGExtractionOutput.model_validate(resp)
 
             last_parsed = out.model_dump()
-            last_raw = ""  # structured, kein Rohtext nötig
+            last_raw = ""
 
             triples = self._finalize(out, doc=doc, chunk_id=chunk_id, source=source)
             if triples:

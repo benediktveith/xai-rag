@@ -2,13 +2,17 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 import re
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+import json
 
 from langchain_core.documents import Document
+from langchain_core.exceptions import OutputParserException
 
 from src.modules.knowledge_graph.kg_schema import KGTriple
 from src.modules.llm.llm_client import LLMClient
 from src.modules.knowledge_graph.relation_registry import RelationRegistry, ProposedRelation, canon_relation
+
+_JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
 
 EntityType = Literal[
     "Disease",
@@ -328,7 +332,7 @@ class KGTripletExtractor:
                 - If you cannot fill in a triple completely, omit it entirely.
 
                 Return strictly structured JSON according to the following schema:
-                {KGExtractionOutput.model_dump_json(indent=3)}
+                {json.dumps(KGExtractionOutput.model_json_schema(), ensure_ascii=False, indent=2)}
 
                 Context:
                 Title: {title}
@@ -427,6 +431,38 @@ class KGTripletExtractor:
 
         return triples
 
+
+
+    def _extract_first_json_object(text: str) -> Optional[dict]:
+        if not text:
+            return None
+        m = _JSON_OBJ.search(text)
+        if not m:
+            return None
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            return None
+
+    def _coerce_list_of_dicts(x: Any) -> List[dict]:
+        if not isinstance(x, list):
+            return []
+        return [t for t in x if isinstance(t, dict)]
+
+    def _filter_valid_triples_dicts(triples: List[dict]) -> List[dict]:
+        req = ["subject", "subject_label", "relation", "object", "object_label"]
+        out: List[dict] = []
+        for t in triples:
+            ok = True
+            for k in req:
+                v = t.get(k)
+                if not isinstance(v, str) or not v.strip():
+                    ok = False
+                    break
+            if ok:
+                out.append(t)
+        return out
+
     def _extract_structured(self, doc: Document, chunk_id: str, source: str) -> TripletExtractionResult:
         llm = self.llm_client.get_llm()
         if llm is None:
@@ -439,17 +475,43 @@ class KGTripletExtractor:
 
         for _ in range(self.max_retries + 1):
             prompt = self._prompt(doc, chunk_id=chunk_id, source=source)
-            resp = structured_llm.invoke(prompt)
 
-            out: KGExtractionOutput
-            if isinstance(resp, KGExtractionOutput):
-                out = resp
-            else:
-                out = KGExtractionOutput.model_validate(resp)
+            try:
+                resp = structured_llm.invoke(prompt)
+
+                out: KGExtractionOutput
+                if isinstance(resp, KGExtractionOutput):
+                    out = resp
+                else:
+                    out = KGExtractionOutput.model_validate(resp)
+
+            except (OutputParserException, ValidationError) as e:
+                last_raw = str(e)
+
+                raw_obj = _extract_first_json_object(last_raw)
+                if not isinstance(raw_obj, dict):
+                    continue
+
+                triples_dicts = _coerce_list_of_dicts(raw_obj.get("triples"))
+                triples_dicts = _filter_valid_triples_dicts(triples_dicts)
+
+                newrels_dicts = _coerce_list_of_dicts(raw_obj.get("new_relations"))
+
+                if not triples_dicts and not newrels_dicts:
+                    continue
+
+                try:
+                    out = KGExtractionOutput.model_validate(
+                        {"triples": triples_dicts, "new_relations": newrels_dicts, "notes": raw_obj.get("notes")}
+                    )
+                except Exception:
+                    continue
+
+            except Exception as e:
+                last_raw = str(e)
+                continue
 
             last_parsed = out.model_dump()
-            last_raw = ""
-
             triples = self._finalize(out, doc=doc, chunk_id=chunk_id, source=source)
             if triples:
                 return TripletExtractionResult(triples=triples, raw=last_raw, parsed=last_parsed)

@@ -9,7 +9,7 @@ class DataLoader:
 
     def __init__(self):
         try:
-            src_dir = Path(__file__).resolve().parent 
+            src_dir = Path(__file__).resolve().parent.parent
             self.PROJECT_ROOT = src_dir.parent.parent
             
         except NameError:

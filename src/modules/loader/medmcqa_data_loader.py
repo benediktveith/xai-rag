@@ -1,5 +1,9 @@
 import json
 import random
+import zipfile
+import gdown
+import urllib.request
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -22,7 +26,7 @@ class MedMCQADataLoader:
 
     def __init__(self):
         try:
-            src_dir = Path(__file__).resolve().parent
+            src_dir = Path(__file__).resolve().parent.parent
             self.PROJECT_ROOT = src_dir.parent.parent
         except NameError:
             self.PROJECT_ROOT = Path.cwd()
@@ -30,6 +34,8 @@ class MedMCQADataLoader:
         self.DATA_DIR = self.PROJECT_ROOT / "data" / "medmcqa"
         self.RAW_DIR = self.DATA_DIR / "raw"
         self.RAW_DIR.mkdir(parents=True, exist_ok=True)
+        self.DOWNLOAD_URL = "https://drive.usercontent.google.com/download?id=15VkJdq5eyWIkfb_aoD3oS8i4tScbHYky&export=download&authuser=0"
+        self.FILE_ID = "15VkJdq5eyWIkfb_aoD3oS8i4tScbHYky"
 
         self._cache: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -67,17 +73,66 @@ class MedMCQADataLoader:
         return data
 
     def _find_split_file(self, split: str) -> Path:
+    
         candidates = [
             self.RAW_DIR / f"{split}.json",
             self.RAW_DIR / f"{split}.jsonl",
         ]
+
+        for p in candidates:
+            if p.exists():
+                return p
+        
+        # If not found, try to download and extract
+        print(f"File for split='{split}' not found. Attempting download...")
+        self._download_and_extract()
+
         for p in candidates:
             if p.exists():
                 return p
 
         raise FileNotFoundError(
-            f"Keine Datei für split='{split}' gefunden. Erwartet z.B. {candidates[0]} oder {candidates[1]}."
+            f"Keine Datei für split='{split}' gefunden (auch nach Download). "
+            f"Erwartet z.B. {candidates[0]} oder {candidates[1]}."
         )
+
+    def _download_and_extract(self) -> None:
+        """Downloads the zip file and extracts files from the 'data/' folder to RAW_DIR."""
+        self.RAW_DIR.mkdir(parents=True, exist_ok=True)
+        zip_path = self.RAW_DIR / "temp_data.zip"
+
+        try:
+            # Download the ZIP file
+            if not zip_path.exists():
+                print(f"Downloading ID {self.FILE_ID} from Google Drive...")
+                url = f'https://drive.google.com/uc?id={self.FILE_ID}'
+                gdown.download(url, str(zip_path), quiet=False)
+
+            print("Extracting files...")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                targets = {"train.json", "test.json", "dev.json"}
+                for member in zip_ref.namelist():
+                    # Check if the file is inside the 'data/' folder in the zip
+                    print(Path(member).name)
+                    
+                    if Path(member).name in targets:
+                        # Remove 'data/' prefix to extract directly to RAW_DIR
+                        filename = Path(member).name
+                        target_path = self.RAW_DIR / filename
+                        
+                        # Open the file from zip and write it to the target path
+                        with zip_ref.open(member) as source, open(target_path, "wb") as target:
+                            shutil.copyfileobj(source, target)
+            
+            print("Download and extraction complete.")
+
+        except Exception as e:
+            # Clean up partial downloads if necessary
+            raise RuntimeError(f"Failed to download/extract data: {e}")
+        finally:
+            # Remove the zip file after extraction to save space
+            if zip_path.exists():
+                zip_path.unlink()
 
     def _load(self, path: Path, cache_key: str) -> List[Dict[str, Any]]:
         if cache_key in self._cache:
@@ -203,3 +258,14 @@ class MedMCQADataLoader:
             docs.append(doc)
 
         return docs
+    
+def format_medmcqa_question(item):
+    question = str(item.get("question", "")).strip()
+    options = []
+    for label, key in [("A", "opa"), ("B", "opb"), ("C", "opc"), ("D", "opd")]:
+        opt = str(item.get(key, "")).strip()
+        if opt:
+            options.append(f"{label}: {opt}")
+    if options:
+        question = f"{question}\n\nOptions:\n" + "\n".join(options)
+    return question.strip()

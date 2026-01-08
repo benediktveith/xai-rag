@@ -4,9 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Tuple
 
-from src.modules.kgrag_ex_pipeline import KGRAGExPipeline, KGRAGRun
-from src.modules.kgrag_ex_perturbations import KGPerturbationFactory, ChainPerturbation
-from src.modules.kg_store import KGStore
+from src.modules.knowledge_graph.kgrag_ex_pipeline import KGRAGExPipeline, KGRAGRun
+from src.modules.knowledge_graph.kgrag_ex_perturbations import KGPerturbationFactory, ChainPerturbation
+from src.modules.knowledge_graph.kg_store import KGStore
 
 import networkx as nx
 

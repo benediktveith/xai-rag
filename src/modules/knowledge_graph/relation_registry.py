@@ -28,13 +28,11 @@ def simple_similarity(a: str, b: str) -> float:
         return 0.0
     if a == b:
         return 1.0
-    # Token Overlap
     ta = set(a.split("_"))
     tb = set(b.split("_"))
     if not ta or not tb:
         return 0.0
     j = len(ta & tb) / max(1, len(ta | tb))
-    # Prefix Bonus
     pref = 0.15 if a.startswith(b) or b.startswith(a) else 0.0
     return min(1.0, j + pref)
 
@@ -64,8 +62,14 @@ class RelationRegistry:
         aliases: Optional[Dict[str, str]] = None,
         pending: Optional[Dict[str, ProposedRelation]] = None,
     ):
-        self.allowed: Set[str] = set(allowed or set())
-        self.aliases: Dict[str, str] = dict(aliases or {})
+        self.allowed: Set[str] = set(canon_relation(x) for x in (allowed or set()) if x)
+        self.aliases: Dict[str, str] = {}
+        for k, v in (aliases or {}).items():
+            kk = canon_relation(k)
+            vv = canon_relation(v)
+            if kk and vv:
+                self.aliases[kk] = vv
+
         self.pending: Dict[str, ProposedRelation] = dict(pending or {})
 
     def resolve(self, name: str) -> str:
@@ -120,7 +124,6 @@ class RelationRegistry:
         if c not in self.pending:
             self.pending[c] = pr
         else:
-            # leichte Anreicherung
             existing = self.pending[c]
             if pr.description and not existing.description:
                 existing.description = pr.description
@@ -172,7 +175,10 @@ class RelationRegistry:
     @classmethod
     def load(cls, path: Path) -> "RelationRegistry":
         if not path.exists():
-            return cls()
+            # Startet sauber mit Defaults in kanonischer Form
+            allowed = set(canon_relation(x) for x in _DEFAULT_RELATIONS() if x)
+            return cls(allowed=allowed, aliases={}, pending={})
+
         rec = json.loads(path.read_text(encoding="utf-8"))
         allowed = set(rec.get("allowed") or [])
         aliases = dict(rec.get("aliases") or {})
@@ -184,3 +190,29 @@ class RelationRegistry:
             except Exception:
                 pending[k] = ProposedRelation(name=k, description=str(v or ""))
         return cls(allowed=allowed, aliases=aliases, pending=pending)
+
+
+def _DEFAULT_RELATIONS() -> List[str]:
+    return [
+        "has_symptom",
+        "has_risk_factor",
+        "diagnosed_by",
+        "treated_with",
+        "managed_by",
+        "uses_medication",
+        "caused_by",
+        "associated_with",
+        "comorbid_with",
+        "occurs_in",
+        "affects",
+        "can_affect",
+        "part_of",
+        "indicates",
+        "measures",
+        "detects",
+        "contraindicated_for",
+        "has_side_effect",
+        "increases_risk_of",
+        "related_to",
+    ]
+

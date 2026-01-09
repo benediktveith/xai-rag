@@ -100,6 +100,36 @@ _REL_LABEL_RULES: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _extract_first_json_object(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    m = _JSON_OBJ.search(text)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+def _coerce_list_of_dicts(x: Any) -> List[dict]:
+    if not isinstance(x, list):
+        return []
+    return [t for t in x if isinstance(t, dict)]
+
+def _filter_valid_triples_dicts(triples: List[dict]) -> List[dict]:
+    req = ["subject", "subject_label", "relation", "object", "object_label"]
+    out: List[dict] = []
+    for t in triples:
+        ok = True
+        for k in req:
+            v = t.get(k)
+            if not isinstance(v, str) or not v.strip():
+                ok = False
+                break
+        if ok:
+            out.append(t)
+    return out
+
 def _norm_text(s: str) -> str:
     s = (s or "").strip()
     s = s.replace("\u00a0", " ")
@@ -430,38 +460,6 @@ class KGTripletExtractor:
             )
 
         return triples
-
-
-
-    def _extract_first_json_object(text: str) -> Optional[dict]:
-        if not text:
-            return None
-        m = _JSON_OBJ.search(text)
-        if not m:
-            return None
-        try:
-            return json.loads(m.group(0))
-        except Exception:
-            return None
-
-    def _coerce_list_of_dicts(x: Any) -> List[dict]:
-        if not isinstance(x, list):
-            return []
-        return [t for t in x if isinstance(t, dict)]
-
-    def _filter_valid_triples_dicts(triples: List[dict]) -> List[dict]:
-        req = ["subject", "subject_label", "relation", "object", "object_label"]
-        out: List[dict] = []
-        for t in triples:
-            ok = True
-            for k in req:
-                v = t.get(k)
-                if not isinstance(v, str) or not v.strip():
-                    ok = False
-                    break
-            if ok:
-                out.append(t)
-        return out
 
     def _extract_structured(self, doc: Document, chunk_id: str, source: str) -> TripletExtractionResult:
         llm = self.llm_client.get_llm()

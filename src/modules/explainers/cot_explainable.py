@@ -108,6 +108,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
 
 class CoTExplainable(ExplainableModule):
     def __init__(self, llm_client: LLMClient):
+        super().__init__()
         self.llm_client = llm_client
 
     def _build_messages(self, query: str, answer: str, documents: Sequence[Any]) -> Tuple[List[BaseMessage], List[str]]:
@@ -271,11 +272,11 @@ class CoTExplainable(ExplainableModule):
 
         raise TypeError(f"Unsupported LLM response type: {type(response)!r}")
 
-    def explain(self, query: str, answer: str, documents: Sequence[Any]) -> ExplainableAnswer:
+    def _explain(self, query: str, answer: str, documents: Sequence[Any]) -> ExplainableAnswer:
         messages, allowed_ids = self._build_messages(query=query, answer=answer, documents=documents)
 
         llm = self.llm_client.get_llm()
-        response = llm.invoke(messages)
+        response = self._llm_call(llm, messages)
         
         return self._parse_llm_response(response)
 

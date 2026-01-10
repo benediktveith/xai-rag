@@ -7,8 +7,13 @@ from typing import Any, Dict, List, Tuple
 
 from rapidfuzz.distance import Levenshtein as RFLevenshtein
 from sentence_transformers import SentenceTransformer, util
+from pydantic import BaseModel, Field
 from .explainable_module import ExplainableModule
-from .llm_client import LLMClient
+from ..llm.llm_client import LLMClient
+
+
+class RAGExAnswer(BaseModel):
+    final_answer: str = Field(..., description="The final answer text without additional reasoning.")
 
 
 @dataclass
@@ -21,9 +26,11 @@ class RAGExConfig:
     perturbation_strategies: Tuple[str, ...] = ("leave_one_out", "random_noise")
     max_tokens: int | None = None
     embedding_model: str = "all-MiniLM-L6-v2"
-    weight_levenshtein: float = 0.4
-    weight_semantic: float = 0.6
+    weight_levenshtein: float = 0.0
+    weight_semantic: float = 1.0
     aggregation: str = "max"  # how to merge multiple perturbations per token: "max" or "mean"
+    importance_normalization: str = "sum"  # "sum" or "max"
+    include_query_tokens: bool = False
     # If empty/None, noise tokens will be generated on the fly via LLM.
     noise_tokens: Tuple[str, ...] = ()
 
@@ -70,15 +77,17 @@ def _extract_answer_text(response: Any) -> str:
 class RAGExExplainable(ExplainableModule):
     """
     Perturbation-based explainer following the RAG-Ex paper.
-    Uses leave-one-word-out perturbations on the context and compares perturbed answers
-    against the baseline answer via Levenshtein + SBERT cosine similarity.
+    Uses leave-one-token-out perturbations on the input and compares perturbed answers
+    against the baseline answer via configured comparison strategies.
     """
 
     def __init__(self, llm_client: LLMClient, config: RAGExConfig | None = None):
+        super().__init__()
         self.llm_client = llm_client
         self.config = config or RAGExConfig()
         self._sbert_model: SentenceTransformer | None = None
-        self._llm = self.llm_client.get_llm()
+        self._llm = self.llm_client._init_base_llm()
+        self._answer_llm = None
         self._noise_words: List[str] = []
 
     def _ensure_sbert(self) -> None:
@@ -106,7 +115,7 @@ class RAGExExplainable(ExplainableModule):
             "Do not number them. Example: apple, river, neon, cobalt"
         )
         try:
-            response = self._llm.invoke(prompt)
+            response = self._llm_call(self._llm, prompt)
             text = _extract_answer_text(response)
             raw_tokens = re.split(r"[,\n]", text)
             cleaned = [tok.strip() for tok in raw_tokens if tok.strip()]
@@ -115,6 +124,33 @@ class RAGExExplainable(ExplainableModule):
         except Exception:
             pass
         return ["foo", "bar", "baz", "qux", "noise"]
+
+    def _ensure_answer_llm(self) -> None:
+        if self._answer_llm is None:
+            self._answer_llm = self._llm.with_structured_output(RAGExAnswer, include_raw=True)
+
+    def _answer_prompt(self, query: str, context: str) -> str:
+        extra = (
+            "Return a JSON object with a single key \"final_answer\".\n"
+            "Do not include any explanations, reasoning, or extra fields.\n"
+            "Example: {\"final_answer\": \"B: Housing\"}"
+        )
+        return self.llm_client._create_final_answer_prompt(query, context, extra=extra)
+
+    def _extract_final_answer(self, response: Any) -> str:
+        if isinstance(response, RAGExAnswer):
+            return response.final_answer
+        if isinstance(response, dict):
+            parsed = response.get("parsed")
+            if isinstance(parsed, RAGExAnswer):
+                return parsed.final_answer
+            if isinstance(parsed, dict) and "final_answer" in parsed:
+                return str(parsed.get("final_answer") or "")
+            if "final_answer" in response:
+                return str(response.get("final_answer") or "")
+        if hasattr(response, "final_answer"):
+            return str(getattr(response, "final_answer") or "")
+        return _extract_answer_text(response)
 
     def _sample_noise_word(self) -> str:
         if self.config.noise_tokens:
@@ -128,7 +164,7 @@ class RAGExExplainable(ExplainableModule):
     def _perturb_random_noise(self, tokens: List[str], token_index: int) -> str:
         noise = self._sample_noise_word()
         new_tokens = list(tokens)
-        new_tokens[token_index] = noise
+        new_tokens[token_index] = f"{noise} {new_tokens[token_index]} {noise}"
         return "".join(new_tokens)
 
     def _generate_perturbations(self, tokens: List[str], token_index: int) -> List[Tuple[str, str]]:
@@ -154,31 +190,54 @@ class RAGExExplainable(ExplainableModule):
         # default max
         return max(scores)
 
-    def explain(self, query: str, answer: str, context: str) -> Dict[str, Any]:
+    def _explain(self, query: str, answer: str, context: str) -> Dict[str, Any]:
         """
-        Explains the given answer by perturbing the context (word-level leave-one-out).
+        Explains the given answer by perturbing the input (question and/or context).
         Returns a dict with token-level importance scores and intermediate similarities.
         """
 
-        tokens, candidate_indices = _tokenize_context(context)
+        query_tokens, query_indices = _tokenize_context(query)
+        context_tokens, context_indices = _tokenize_context(context)
+
+        candidates: List[Tuple[str, int]] = []
+        if self.config.include_query_tokens:
+            candidates.extend([("query", idx) for idx in query_indices])
+        candidates.extend([("context", idx) for idx in context_indices])
 
         if self.config.max_tokens is not None:
-            candidate_indices = candidate_indices[: self.config.max_tokens]
+            candidates = candidates[: self.config.max_tokens]
 
         weights = self.config.normalized_weights()
         results: List[Dict[str, Any]] = []
         raw_scores: List[float] = []
 
-        for id, idx in enumerate(candidate_indices):
-            print(f'Pertubating {id + 1} of {len(candidate_indices)}')
+        for step, (segment, idx) in enumerate(candidates):
+            print(f"Perturbating {step + 1} of {len(candidates)}")
 
             per_strategy_scores: List[float] = []
             per_strategy_details: List[Dict[str, Any]] = []
 
-            for strategy_name, perturbed_context in self._generate_perturbations(tokens, idx):
-                prompt = self.llm_client._create_final_answer_prompt(query, perturbed_context)
-                response = self._llm.invoke(prompt)
-                perturbed_answer = _extract_answer_text(response)
+            if segment == "query":
+                base_tokens = query_tokens
+                base_query = query
+                base_context = context
+            else:
+                base_tokens = context_tokens
+                base_query = query
+                base_context = context
+
+            for strategy_name, perturbed_segment in self._generate_perturbations(base_tokens, idx)[:5]:
+                if segment == "query":
+                    perturbed_query = perturbed_segment
+                    perturbed_context = base_context
+                else:
+                    perturbed_query = base_query
+                    perturbed_context = perturbed_segment
+
+                self._ensure_answer_llm()
+                prompt = self._answer_prompt(perturbed_query, perturbed_context)
+                response = self._llm_call(self._answer_llm, prompt)
+                perturbed_answer = self._extract_final_answer(response)
 
                 lev_sim = _levenshtein_similarity(answer, perturbed_answer)
                 sem_sim = self._semantic_similarity(answer, perturbed_answer)
@@ -190,6 +249,7 @@ class RAGExExplainable(ExplainableModule):
                 per_strategy_details.append(
                     {
                         "strategy": strategy_name,
+                        "perturbed_answer": perturbed_answer,
                         "levenshtein_similarity": lev_sim,
                         "semantic_similarity": sem_sim,
                         "combined_similarity": similarity,
@@ -201,22 +261,28 @@ class RAGExExplainable(ExplainableModule):
             raw_scores.append(aggregated_importance)
             results.append(
                 {
-                    "token": tokens[idx],
+                    "segment": segment,
+                    "token": base_tokens[idx],
                     "token_index": idx,
                     "importance_raw": aggregated_importance,
                     "details": per_strategy_details,
                 }
             )
 
-        max_score = max(raw_scores) if raw_scores else 0.0
-        if max_score > 0:
+        if self.config.importance_normalization == "sum":
+            denom = sum(raw_scores)
+        else:
+            denom = max(raw_scores) if raw_scores else 0.0
+
+        if denom > 0:
             for item in results:
-                item["importance"] = item["importance_raw"] / max_score
+                item["importance"] = item["importance_raw"] / denom
         else:
             for item in results:
                 item["importance"] = 0.0
 
         return {
+            "query": query,
             "baseline_answer": answer,
             "context": context,
             "results": results,
@@ -227,9 +293,10 @@ class RAGExExplainable(ExplainableModule):
         """
         Returns a formatted string listing tokens with their normalized importance and per-strategy details.
         """
-        lines = ["token\timportance\tstrategies"]
+        lines = ["segment\ttoken\timportance\tstrategies"]
         for item in explanation.get("results", []):
             token_display = item.get("token", "").replace("\n", "\\n")
+            segment = item.get("segment", "")
             importance = item.get("importance", 0.0)
             details = item.get("details", [])
             detail_parts = []
@@ -237,6 +304,6 @@ class RAGExExplainable(ExplainableModule):
                 detail_parts.append(
                     f"{d.get('strategy')}:raw={d.get('importance_raw', 0.0):.3f},sim={d.get('combined_similarity', 0.0):.3f}"
                 )
-            lines.append(f"{token_display}\t{importance:.3f}\t{' | '.join(detail_parts)}")
+            lines.append(f"{segment}\t{token_display}\t{importance:.3f}\t{' | '.join(detail_parts)}")
 
         return "\n".join(lines)

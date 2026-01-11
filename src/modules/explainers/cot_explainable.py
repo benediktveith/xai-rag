@@ -139,10 +139,15 @@ class CoTExplainable(ExplainableModule):
               * rationale: short justification grounded in the cited docs (or minimal when using [no-source]).
 
             RULES:
-            - span MUST be text taken from (or paraphrasing) the provided answer, never a doc id or citation tag.
+            - span MUST be a verbatim excerpt from the provided answer, never a doc id or citation tag.
+            - Only cite a doc id if the cited doc contains a direct quote supporting the span.
+              If no cited doc contains the span, use [no-source] and keep rationale minimal.
+            - Limit support to at most 2 doc ids per item; prefer a single best source.
             - Every factual claim in evidence MUST have support ids.
             - Reasoning steps MUST be numbered and reference their supporting doc ids.
             - Prefer higher-score docs when multiple support the same claim, but do NOT ignore the only direct evidence.
+            - Reasoning support should only include doc ids already used in evidence (or [no-source]).
+            - For support_type direct/bridge, quote is required; if no quote exists, use [no-source].
             - Do NOT invent new ids; only use the allowed list.
 
             EXAMPLES:
@@ -300,6 +305,7 @@ class CoTExplainable(ExplainableModule):
             lines.append(f"evidence: {ev.span}")
             lines.append(f"  support: {', '.join(ev.support)}")
             lines.append(f"  rationale: {ev.rationale}")
+            lines.append(f"Reasoning steps:")
 
             related_steps = [
                 step for step in expl.reasoning if any(sup in step.support for sup in ev.support)

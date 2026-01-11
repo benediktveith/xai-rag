@@ -94,9 +94,10 @@ class LLMClient:
 
             Original Question: {initial_query}
 
-            Full Context from all search hops:
+            <Full Context from all search hops>
             {context}
-
+            <End of Context>
+            
             {extra}
             Final Answer:
             """

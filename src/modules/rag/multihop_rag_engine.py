@@ -25,7 +25,7 @@ class MultiHopRAGEngine:
         self._llm_client = llm_client
         self.num_hops = num_hops
 
-    def run_and_trace(self, initial_query: str) -> Dict[str, Any]:
+    def run_and_trace(self, initial_query: str, extra: str = '') -> Dict[str, Any]:
         """
         Executes the multi-hop RAG process for a given query and returns a detailed trace.
 
@@ -59,7 +59,7 @@ class MultiHopRAGEngine:
             top_doc = retrieved_docs[0]
             lowest_doc = retrieved_docs[-1] # also track the lowest ranked document
             context_docs = retrieved_docs[:min(4,len(retrieved_docs))]
-            all_documents.append(top_doc)
+            all_documents.extend(retrieved_docs)
 
             # 2. Store the results of this hop in our trace
             hop_info = {
@@ -86,7 +86,7 @@ class MultiHopRAGEngine:
 
         # 5. After all hops, generate the final answer using all gathered context
         print("\nGenerating final answer...")
-        answer_prompt = self._llm_client._create_final_answer_prompt(initial_query, context_so_far)
+        answer_prompt = self._llm_client._create_final_answer_prompt(initial_query, context_so_far, extra)
         
         final_answer_response = self.llm.invoke(answer_prompt)
         final_answer = final_answer_response.content.strip()

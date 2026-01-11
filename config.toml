@@ -1,6 +1,6 @@
 [medmcqa]
 seed = 42
-n_qa_questions = 50
+n_qa_questions = 10
 split = "val"
 
 [rag]

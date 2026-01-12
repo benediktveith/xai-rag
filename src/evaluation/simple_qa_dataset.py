@@ -47,33 +47,33 @@ SIMPLE_QA_DATASET = [
     },
     {
         "question": "Was ist Marks Lieblingsessen?",
-        "context": "Mark isst am liebsten Pizza. Seine Frau bevorzugt Sushi. Der Sohn mag Burger am meisten.",
+        "context": "Mark geht oft in verschiedene Restaurants. Als Kind mochte er nur Nudeln. In der Studienzeit aß er hauptsächlich Burger und Fast Food. Seine Frau bevorzugt Sushi und versucht ihn zu überzeugen, gesünder zu essen. Der Sohn mag Burger am meisten. Seit drei Jahren isst Mark am liebsten Pizza, besonders mit Salami und Pilzen. Am Wochenende bestellt die Familie meistens gemeinsam beim Italiener.",
         "answer": "Pizza",
-        "evidence": "Mark isst am liebsten Pizza."
+        "evidence": "Seit drei Jahren isst Mark am liebsten Pizza, besonders mit Salami und Pilzen."
     },
     {
-        "question": "Wie alt ist Emma?",
-        "context": "Emma ist 25 Jahre alt. Ihr Bruder Felix ist 30. Die jüngste Schwester Sophie ist erst 18.",
-        "answer": "25 Jahre",
-        "evidence": "Emma ist 25 Jahre alt."
+        "question": "Ist Emma noch minderjährig?",
+        "context": "Emma wurde 1998 geboren und hat dieses Jahr ihren Geburtstag bereits gefeiert. Ihr älterer Bruder Felix kam 1993 zur Welt und arbeitet seit fünf Jahren als Arzt. Die jüngste Schwester Sophie ist erst 18 Jahre alt und macht gerade Abitur. Ihre Mutter wurde 1970 geboren. Die Familie plant eine große Feier, wenn Emma nächstes Jahr ihren runden Geburtstag hat. Ihr Vater scherzt oft, dass Emma jetzt im besten Alter für eine Karriere ist.",
+        "answer": "Nein",
+        "evidence": "Emma wurde 1998 geboren und hat dieses Jahr ihren Geburtstag bereits gefeiert."
     },
     {
-        "question": "Hat David Kinder?",
-        "context": "David hat zwei Kinder, einen Sohn und eine Tochter. Sein Kollege Stefan ist kinderlos. Die Nachbarin hat drei Kinder.",
-        "answer": "Ja, zwei Kinder",
-        "evidence": "David hat zwei Kinder, einen Sohn und eine Tochter."
+        "question": "Wie heißen David seine Kinder?",
+        "context": "David ist 45 Jahre alt und seit 15 Jahren verheiratet. Sein Kollege Stefan ist kinderlos und reist viel. Die Nachbarin hat drei Kinder und beneidet David manchmal. Davids Sohn Max ist 12 Jahre alt und spielt gerne Fußball. Davids Tochter Lisa ist 8 und geht in die zweite Klasse. David arbeitet von zu Hause aus, um mehr Zeit mit seiner Familie zu verbringen. Seine Frau arbeitet Teilzeit als Architektin. Am Wochenende unternimmt die ganze Familie oft Ausflüge in die Natur.",
+        "answer": "Max und Lisa",
+        "evidence": "Davids Sohn Max ist 12 Jahre alt und spielt gerne Fußball. Seine Tochter Lisa ist 8 und geht in die zweite Klasse."
     },
     {
-        "question": "Wohin reist Maria im Urlaub?",
-        "context": "Maria fliegt dieses Jahr nach Spanien. Letztes Jahr war sie in Italien. Ihre Freundin fährt nach Frankreich.",
-        "answer": "Spanien",
-        "evidence": "Maria fliegt dieses Jahr nach Spanien."
+        "question": "Wohin reist Maria in den Urlaub?",
+        "context": "Maria plant ihre Sommerreise sehr sorgfältig. Letztes Jahr war sie in Italien und hat Rom besichtigt. Ihre beste Freundin Laura fährt nach Frankreich an die Côte d'Azur. Maria hatte ursprünglich vor, nach Griechenland zu fliegen, aber die Flüge waren zu teuer. Dann überlegte sie, nach Portugal zu fahren. Letzte Woche hat sie sich aber endgültig entschieden und Flüge nach Barcelona gebucht. Sie freut sich sehr auf die spanische Küche und die Architektur von Gaudí. Ihr Bruder empfiehlt ihr, auch Madrid zu besuchen, aber dafür hat sie nur eine Woche Zeit.",
+        "answer": "Barcelona",
+        "evidence": "Letzte Woche hat sie sich aber endgültig entschieden und Flüge nach Barcelona gebucht."
     },
     {
         "question": "Welche Sportart betreibt Tim?",
-        "context": "Tim trainiert regelmäßig Fußball im Verein. Seine Schwester schwimmt gerne. Der Vater spielt Golf.",
+        "context": "Tim ist sehr sportlich und aktiv. Als Kind nahm er Schwimmunterricht, genau wie seine Schwester heute noch gerne schwimmt. In der Schule spielte er zwei Jahre lang Basketball. Sein Vater spielt jeden Sonntag Golf im Country Club. Letztes Jahr probierte Tim Yoga aus, machte aber nach drei Monaten nicht weiter. Seit vier Jahren trainiert Tim dreimal pro Woche Fußball im Verein TSV München. Er spielt dort im Mittelfeld und hat letztes Jahr sogar ein Tor im Finale geschossen. Nebenbei geht er manchmal joggen, aber das ist nur zum Fitbleiben. Sein Trainer sagt, er hätte das Zeug zum Profispieler.",
         "answer": "Fußball",
-        "evidence": "Tim trainiert regelmäßig Fußball im Verein."
+        "evidence": "Seit vier Jahren trainiert Tim dreimal pro Woche Fußball im Verein TSV München."
     }
 ]
 

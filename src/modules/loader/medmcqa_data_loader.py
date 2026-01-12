@@ -51,6 +51,7 @@ class MedMCQADataLoader:
 
         config = self._load_config()
         config_medmcqa = config.get("medmcqa", {}) if isinstance(config.get("medmcqa"), dict) else {}
+        self.allowed_ids = config_medmcqa.get("question_ids", [])
 
         seed = self._coerce_int(
             config_medmcqa.get("seed")
@@ -193,7 +194,11 @@ class MedMCQADataLoader:
         indices = list(range(len(data)))
         random.Random(seed).shuffle(indices)
         indices = indices[:limit]
-        return [data[i] for i in indices]
+        
+        if len(self.allowed_ids) == 0:
+            return [data[i] for i in indices]
+        
+        return [data[i] for i in indices if data[i].get("id") in self.allowed_ids]
 
     def _to_documents(self, data, split: str):
         from langchain_core.documents import Document

@@ -1,7 +1,7 @@
 [medmcqa]
 seed = 42
-n_qa_questions = 10
-split = "val"
+n_qa_questions = 10000
+split = "train"
 
 question_ids = [
     "7a10e05d-f20e-4a3f-8e3c-b6835c8e1b6b",

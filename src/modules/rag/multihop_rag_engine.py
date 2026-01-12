@@ -58,16 +58,16 @@ class MultiHopRAGEngine:
             # For simplicity, we'll focus on the top document for the trace
             top_doc = retrieved_docs[0]
             lowest_doc = retrieved_docs[-1] # also track the lowest ranked document
-            context_docs = retrieved_docs[:min(4,len(retrieved_docs))]
+            context_docs = retrieved_docs[:min(3,len(retrieved_docs))]
             all_documents.append(top_doc)
 
             # 2. Store the results of this hop in our trace
             hop_info = {
                 "hop_number": hop_number,
                 "query_for_this_hop": current_query,
-                "retrieved_document_for_this_hop": top_doc,
+                "highest_ranked_document": top_doc,
                 "lowest_ranked_document" : lowest_doc,       # added for comparison to low ranked documents
-                "documents_passed_to_context" : context_docs
+                "context_documents" : context_docs
             }
             trace["hops"].append(hop_info)
 
@@ -76,15 +76,20 @@ class MultiHopRAGEngine:
 
             # 4. If not the last hop, generate the next query
             if i < self.num_hops - 1:
-                prompt = self._llm_client._create_next_query_prompt(initial_query, context_so_far)
                 print("Generating next query...")
+                prompt = self._llm_client._create_next_query_prompt(initial_query, context_so_far)
+                
+                # 5. Check if the LLM considered the context as sufficient, then STOP hop process
+                if prompt == "STOP":
+                    print(f"Context sufficient at Hop: {hop_number} of {self.num_hops}")
+                    break
                 
                 llm_response = self.llm.invoke(prompt)
                 next_query = llm_response.content.strip()
                 
                 current_query = next_query
 
-        # 5. After all hops, generate the final answer using all gathered context
+        # 6. After all hops, generate the final answer using all gathered context
         print("\nGenerating final answer...")
         answer_prompt = self._llm_client._create_final_answer_prompt(initial_query, context_so_far)
         

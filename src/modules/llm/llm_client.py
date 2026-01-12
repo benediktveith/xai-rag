@@ -86,17 +86,27 @@ class LLMClient:
             """
     
     def _create_final_answer_prompt(self, initial_query: str, context: str, extra: str = '') -> str:
-        """Creates the prompt to generate the final answer from the accumulated context."""
-        
+        """Creates the prompt to generate the final answer strictly from context."""
+    
         return f"""
-            You are a helpful assistant. Using all the provided context from multiple search hops, you must answer the original question.
-            If the context is not sufficient, state that you cannot answer the question with the given information.
+            You are a precise and truthful AI assistant.
 
-            Original Question: {initial_query}
+            TASK:
+            Answer the 'Original Question' using ONLY the 'Accumulated Context' provided below.
 
-            Full Context from all search hops:
-            {context}
-
+            RULES:
+            1. STRICTLY LIMIT your answer to facts contained in the Context. Do not use outside knowledge.
+            2. If the Context does not contain the answer, say exactly: "I cannot answer this question based on the provided information."
+            3. Do not mention "the documents", "the context", or "the search results" in your output. Just state the facts.
             {extra}
+
+            Original Question: 
+            "{initial_query}"
+
+            Accumulated Context:
+            ####################
+            {context}
+            ####################
+
             Final Answer:
             """

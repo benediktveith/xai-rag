@@ -10,13 +10,12 @@
 -> Eine Config erstellen und verwenden
 
 ### Metriken (Quantitativ)
-(Jaccard Koeffizienten verwenden)
 
-- Feature Importance (Domi, Bene, Jan)
-- Score der Antwort (zB F1-Score / Accuracy) (Domi, Bene, Jan)
+- Faithfulness (NLI Score): We employ Natural Language Inference to determine if the generated answer is logically entailed by the retrieved snippets ensuring the explanation is not a "persuasive hallucination."
 
-- Geschwindigkeit
-- (LLM) Calls / Token Usage (Kosten)
+- Interpretability (Jaccard Coefficient): We use the Jaccard similarity to measure the overlap between system-generated highlights and annotated evidence.
+
+- Efficiency: Measured via response latency and token consumption to assess the overhead of generating explanations.
 
 ### Metriken (Qualitativ)
 

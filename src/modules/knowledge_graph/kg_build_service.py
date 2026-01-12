@@ -1,3 +1,5 @@
+# src/modules/knowledge_graph/kg_build_service.py
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -8,6 +10,7 @@ from src.modules.knowledge_graph.kg_schema import KGTriple
 from src.modules.knowledge_graph.kg_store import KGStore
 from src.modules.knowledge_graph.kg_triplet_extractor import KGTripletExtractor
 from src.modules.knowledge_graph.relation_registry import RelationRegistry, ProposedRelation
+
 
 @dataclass(frozen=True)
 class KGBuildStats:
@@ -45,7 +48,8 @@ _SYMMETRIC_RELATIONS = {
 }
 
 def _triple_key(t: KGTriple) -> Tuple[str, str, str, str, str]:
-    return (t.subject.lower(), t.relation.upper(), t.object.lower(), t.subject_type, t.object_type)
+    rel = str(getattr(t, "relation", "") or "").upper()
+    return (str(t.subject or "").lower(), rel, str(t.object or "").lower(), str(t.subject_type or ""), str(t.object_type or ""))
 
 
 def _swap_meta_labels(meta: Dict) -> Dict:
@@ -66,9 +70,9 @@ class KGBuildService:
         extractor: KGTripletExtractor,
         relation_registry: RelationRegistry,
         registry_cache_path: Path,
-        add_reverse_edges: bool = True,
-        add_symmetric_relations: bool = True,
-        auto_accept_reverse_relations: bool = True,
+        add_reverse_edges: bool = False,
+        add_symmetric_relations: bool = False,
+        auto_accept_reverse_relations: bool = False,
     ):
         self.extractor = extractor
         self.registry = relation_registry
@@ -87,10 +91,8 @@ class KGBuildService:
         source_name: str = "medical",
     ) -> Tuple[KGStore, KGBuildStats]:
         kg = KGStore()
-
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Load registry if present
         if self.registry_cache_path.exists():
             loaded = RelationRegistry.load(self.registry_cache_path)
             self.registry.allowed = loaded.allowed
@@ -108,6 +110,9 @@ class KGBuildService:
             )
             return kg, stats
 
+        if force_rebuild and cache_path.exists():
+            cache_path.unlink()
+
         docs_seen = 0
         docs_with_triples = 0
         forward_total = 0
@@ -119,6 +124,7 @@ class KGBuildService:
             if limit is not None and i >= int(limit):
                 break
 
+            print(f"Verarbeite Dokumente {i} mit inhalt {doc}")
             docs_seen += 1
 
             meta = doc.metadata or {}
@@ -129,23 +135,22 @@ class KGBuildService:
             if not triples_fwd:
                 continue
 
+            print(f"Dok NR. {i}. Triple extrahiert: {triples_fwd}")
             docs_with_triples += 1
-            to_add: List[KGTriple] = []
 
             for t in triples_fwd:
+                newly_added: List[KGTriple] = []
+
                 k = _triple_key(t)
-                if k in seen:
-                    continue
+                if k not in seen:
+                    seen.add(k)
+                    newly_added.append(t)
+                    forward_total += 1
 
-                seen.add(k)
-                to_add.append(t)
-                forward_total += 1
+                rel = str(getattr(t, "relation", "") or "").upper()
 
-                rel = str(t.relation or "").upper()
-
-                # symmetric
                 if self.add_symmetric_relations and rel in _SYMMETRIC_RELATIONS:
-                    meta_syn = _swap_meta_labels(dict(t.meta or {}))
+                    meta_syn = _swap_meta_labels(dict(getattr(t, "meta", {}) or {}))
                     meta_syn.update(
                         {
                             "synthetic": True,
@@ -169,57 +174,57 @@ class KGBuildService:
                     rk = _triple_key(rev)
                     if rk not in seen:
                         seen.add(rk)
-                        to_add.append(rev)
+                        newly_added.append(rev)
                         reverse_total += 1
-                    continue
 
-                # reverse
                 if self.add_reverse_edges:
                     rev_rel = _REVERSE_RELATION_MAP.get(rel)
-                    if not rev_rel or rev_rel == rel:
-                        continue
+                    if rev_rel and rev_rel != rel:
+                        if self.auto_accept_reverse_relations:
+                            self.registry.accept(rev_rel)
+                        else:
+                            self.registry.propose(
+                                ProposedRelation(name=rev_rel, description=f"Auto reverse of {rel}"),
+                                alias_threshold=0.95,
+                            )
 
-                    if self.auto_accept_reverse_relations:
-                        self.registry.accept(rev_rel)
-                    else:
-                        # mindestens als pending aufnehmen
-                        self.registry.propose(
-                            ProposedRelation(name=rev_rel, description=f"Auto reverse of {rel}"),
-                            alias_threshold=0.95,
+                        meta_syn = _swap_meta_labels(dict(getattr(t, "meta", {}) or {}))
+                        meta_syn.update(
+                            {
+                                "synthetic": True,
+                                "reverse_of": rel,
+                                "relation_raw": rev_rel,
+                            }
                         )
 
-                    meta_syn = _swap_meta_labels(dict(t.meta or {}))
-                    meta_syn.update(
-                        {
-                            "synthetic": True,
-                            "reverse_of": rel,
-                            "relation_raw": rev_rel,
-                        }
-                    )
+                        rev = KGTriple(
+                            subject=t.object,
+                            relation=rev_rel,
+                            object=t.subject,
+                            subject_type=t.object_type,
+                            object_type=t.subject_type,
+                            source=t.source,
+                            chunk_id=t.chunk_id,
+                            meta=meta_syn,
+                        )
 
-                    rev = KGTriple(
-                        subject=t.object,
-                        relation=rev_rel,
-                        object=t.subject,
-                        subject_type=t.object_type,
-                        object_type=t.subject_type,
-                        source=t.source,
-                        chunk_id=t.chunk_id,
-                        meta=meta_syn,
-                    )
+                        rk = _triple_key(rev)
+                        if rk not in seen:
+                            seen.add(rk)
+                            newly_added.append(rev)
+                            reverse_total += 1
 
-                    rk = _triple_key(rev)
-                    if rk not in seen:
-                        seen.add(rk)
-                        to_add.append(rev)
-                        reverse_total += 1
+                # Sofort speichern, sobald neue Knoten oder Kanten entstehen
+                if newly_added:
+                    kg.add_triples(newly_added)
 
-            if to_add:
-                kg.add_triples(to_add)
+                    # Inkrementelle Persistenz, pro KGTriple eine JSONL Zeile append
+                    kg.append_jsonl_events(cache_path, newly_added, flush=True)
 
-            self.registry.save(self.registry_cache_path)
+                    # Registry ebenfalls zeitnah persistieren
+                    self.registry.save(self.registry_cache_path)
 
-        kg.save_jsonl(cache_path)
+        # Finaler Registry Save, redundant aber unkritisch
         self.registry.save(self.registry_cache_path)
 
         stats = KGBuildStats(

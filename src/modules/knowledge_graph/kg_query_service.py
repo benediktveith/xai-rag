@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import permutations
+from itertools import permutations, combinations
 from typing import List, Optional, Tuple
 
 import re
@@ -17,6 +17,7 @@ from src.modules.llm.llm_json import LLMJSON
 @dataclass(frozen=True)
 class QueryEntities:
     entities: List[str]
+    pairs: List[Tuple[str, str]]
 
 
 _WS = re.compile(r"\s+")
@@ -43,7 +44,6 @@ class KGQueryService:
 
         self._nodes: List[str] = [str(n) for n in self.kg.g.nodes]
 
-        # Node IDs sind bereits die Namen
         self._node_names: dict[str, str] = {n: n for n in self._nodes}
         self._node_tokens: dict[str, set[str]] = {n: _token_set(self._node_names[n]) for n in self._nodes}
         self._node_canon_name: dict[str, str] = {n: _canon_text(self._node_names[n]) for n in self._nodes}
@@ -54,48 +54,110 @@ class KGQueryService:
             if c and c not in self._node_by_canon:
                 self._node_by_canon[c] = n
 
-    def extract_entities(self, question: str, k: int = 6) -> QueryEntities:
+    def extract_entities(self, question: str) -> QueryEntities:
+        """
+        Notebook nah:
+        - LLM extrahiert Entity Paare
+        - Zusätzlich Entities Liste, für Fallback Kombinationen
+        Fallback ohne LLM:
+        - Entities per KG string match und token overlap
+        - Pairs als Kombinationen aus Entities
+        """
+        # 1) LLM Pfad, liefert Entities und Pairs
         if self.llm_client:
             llm = self.llm_client.get_llm()
             if llm is not None:
                 prompt = f"""
 Return ONLY JSON, no extra text.
-Schema: {{ "entities": ["...", "..."] }}
+
+Schema:
+{{
+  "entities": ["...", "..."],
+  "pairs": [["...", "..."], ["...", "..."]]
+}}
 
 Task:
-Extract 2 to {k} central medical entities from the question.
+Extract central medical entities AND medically relevant entity pairs from the question.
 Entities must be short noun phrases.
+Pairs must be two distinct entities.
 Do not output answer options or single letters.
 
 Question:
 {question}
 """.strip()
+
                 resp = llm.invoke(prompt)
                 raw = (getattr(resp, "content", str(resp)) or "").strip()
                 parsed = LLMJSON.extract_json(raw)
-                if isinstance(parsed, dict) and isinstance(parsed.get("entities"), list):
-                    ents: List[str] = []
-                    for x in parsed["entities"]:
-                        s = str(x).strip()
-                        if len(s) == 1 and s.upper() in {"A", "B", "C", "D"}:
-                            continue
-                        if s:
-                            ents.append(s)
-                    return QueryEntities(entities=ents[:k])
 
+                ents_out: List[str] = []
+                pairs_out: List[Tuple[str, str]] = []
+
+                if isinstance(parsed, dict):
+                    ents = parsed.get("entities")
+                    if isinstance(ents, list):
+                        for x in ents:
+                            s = str(x).strip()
+                            if len(s) == 1 and s.upper() in {"A", "B", "C", "D"}:
+                                continue
+                            if s:
+                                ents_out.append(s)
+
+                    prs = parsed.get("pairs")
+                    if isinstance(prs, list):
+                        for p in prs:
+                            if not isinstance(p, (list, tuple)) or len(p) != 2:
+                                continue
+                            a = str(p[0]).strip()
+                            b = str(p[1]).strip()
+                            if not a or not b:
+                                continue
+                            if len(a) == 1 and a.upper() in {"A", "B", "C", "D"}:
+                                continue
+                            if len(b) == 1 and b.upper() in {"A", "B", "C", "D"}:
+                                continue
+                            if a == b:
+                                continue
+                            pairs_out.append((a, b))
+
+                # Pairs deduplizieren, Reihenfolge stabil halten
+                seen = set()
+                pairs_dedup: List[Tuple[str, str]] = []
+                for a, b in pairs_out:
+                    key = (_canon_text(a), _canon_text(b))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    pairs_dedup.append((a, b))
+
+                # Entities zusätzlich aus Pairs ergänzen, damit Fallback mehr Material hat
+                if pairs_dedup:
+                    for a, b in pairs_dedup:
+                        if a and a not in ents_out:
+                            ents_out.append(a)
+                        if b and b not in ents_out:
+                            ents_out.append(b)
+
+                return QueryEntities(entities=ents_out, pairs=pairs_dedup)
+
+        # 2) Heuristik Pfad ohne LLM
         q = _canon_text(question)
-        hits = [self._node_names[n] for n in self._nodes if self._node_canon_name[n] and self._node_canon_name[n] in q]
-        if len(hits) >= 2:
-            return QueryEntities(entities=hits[:k])
 
-        toks = _token_set(question)
-        scored: List[Tuple[int, str]] = []
-        for n in self._nodes:
-            inter = len(toks & (self._node_tokens.get(n) or set()))
-            if inter > 0:
-                scored.append((inter, self._node_names[n]))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return QueryEntities(entities=[x[1] for x in scored[:k]])
+        hits = [self._node_names[n] for n in self._nodes if self._node_canon_name[n] and self._node_canon_name[n] in q]
+
+        if len(hits) < 2:
+            toks = _token_set(question)
+            scored: List[Tuple[int, str]] = []
+            for n in self._nodes:
+                inter = len(toks & (self._node_tokens.get(n) or set()))
+                if inter > 0:
+                    scored.append((inter, self._node_names[n]))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            hits = [x[1] for x in scored[:8]]
+
+        # Pairs als Kombinationen, wie im Autoren Notebook Prinzip
+        pairs = [(a, b) for a, b in combinations(hits, 2)]
+        return QueryEntities(entities=hits, pairs=pairs)
 
     def map_to_node(self, ent: str) -> Optional[str]:
         if not ent:

@@ -1,7 +1,69 @@
 [medmcqa]
 seed = 42
-n_qa_questions = 50
-split = "val"
+n_qa_questions = 10000
+split = "train"
+
+question_ids = [
+    "7a10e05d-f20e-4a3f-8e3c-b6835c8e1b6b",
+    "52fd537b-dc7f-4cf1-9a3a-6757ebd9ea31",
+    "bf28775c-403b-48c9-a5ba-07f1217f17e3",
+    "6fb704dd-cd21-4196-8f4a-3e63dc7b341f",
+    "30f2a6d9-f28f-48f0-8749-ee1de6a3d6c8",
+    "2fb10eb6-7899-4770-ae74-fd810d176a22",
+    "2102be8a-6b29-43cf-a259-0c9a4cd33f53",
+    "3f020b60-da1a-40fa-93eb-462cbcc61ed2",
+    "2120feb1-085e-4af7-8788-e4540f510f54",
+    "4546a1ec-61a8-4cce-ad74-88b704bec98c",
+    "f54f8baa-fab2-4eae-a6d5-2be43f1d2930",
+    "5288e33d-a4df-4fd8-8498-7b0030b6fbc3",
+    "329564f9-5916-4e24-b8b6-efa776d8f334",
+    "1578420b-45fb-46b1-bc81-da223c9a9b4a",
+    "693d59e9-1eee-4b5b-addd-f6963f1e69e6",
+    "80a922e3-e55d-4cdc-8a90-3100c3647e99",
+    "71453fe5-854a-4456-9012-04208d5132c2",
+    "d4f06476-b47f-4bf7-9d32-531db1974a8e",
+    "b452daac-d602-4482-a09a-6294405b6f61",
+    "9d0968c7-0bfa-42c5-9e1f-1cf35c40b36e",
+    "b00dd38c-f342-4272-b2e3-a9700b6ff406",
+    "ee52d885-7ce4-4a98-a4d3-a0464b388072",
+    "2e237c12-b3f6-4771-ac63-b2780e15be83",
+    "fc7caec4-0208-4d96-8fd4-4f3a9037209b",
+    "0d6d8296-aef0-4eed-9297-01ef78d699ae",
+    "8409ee38-1922-4ac9-9178-ba699e33e643",
+    "99d4ff2a-2513-480c-ac7e-1020b52c3bc3",
+    "6ffd899a-4d4b-4216-b8ac-6e16a4b0daa1",
+    "15374e65-2f0e-4b06-9698-2a3fd852ef08",
+    "fc913366-8a30-442c-9769-0e4aa0ad5829",
+    "6e46a29a-3d34-4b35-bb4f-39693b5c608e",
+    "75bec15b-5bca-42e6-98fc-f48d9963ff4c",
+    "3f63787d-7816-48fe-a623-b61ba10a3001",
+    "bc3df9cd-8f28-4710-beb7-8861adc974be",
+    "7f444937-f1ae-403c-9427-34f6d5c18aa6",
+    "71c5caf2-bd33-41ff-89d6-3ccf06137dc1",
+    "f4a69fc6-54ef-4342-8fcc-3849ca6e8d72",
+    "dea5db70-e900-4d6e-8851-e3e81b9df816",
+    "6f0fb72d-ed2c-4dbb-8091-b839451b46a0",
+    "d5820f6b-b829-435f-87e5-98d5514000d0",
+    "dc47f7fa-731b-4715-89fa-fef4958eb57f",
+    "05454fa7-0d26-4f83-be39-cd51e4622f19",
+    "329f4086-c777-4455-9ff0-79e80575784a",
+    "967f4844-2959-42d2-9164-b0cbd55012bf",
+    "b261484b-635b-4abb-8301-80bee3da24f7",
+    "70d993ec-1ae5-4189-9c5e-2f77f45434ce",
+    "ca659bf0-9bf4-415d-afac-18a5b878a136",
+    "bc191b12-a85e-41ef-99b9-a1aad5fa6c37",
+    "ae4abedb-6625-4037-b810-f27189f4eda2",
+    "c227709c-cc31-460f-a5e5-fa5248dfa3d3",
+    "250a657a-e35d-4a5b-98d3-6399760b0209",
+    "d710d2f4-0d24-46b4-b50d-9633fe43b73f",
+    "775156bc-1cc6-4d4d-ae0d-852182dfc94e",
+    "f7c6e673-3268-4c7a-abf2-dff2426a1ae0",
+    "fdd71923-4db9-4133-b496-a386aba2d4b1",
+    "c2b01b67-109e-4017-b9e8-90158959db10",
+    "9895028a-61bb-41d1-b589-b595c5d70706",
+    "45ddd48d-d0c6-4100-ae86-01c170a203b6",
+    "566ebfa3-bb52-48eb-bd99-bfddee74eab9"
+]
 
 [rag]
 n_hops = 2

@@ -2,13 +2,17 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 import re
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+import json
 
 from langchain_core.documents import Document
+from langchain_core.exceptions import OutputParserException
 
 from src.modules.knowledge_graph.kg_schema import KGTriple
 from src.modules.llm.llm_client import LLMClient
 from src.modules.knowledge_graph.relation_registry import RelationRegistry, ProposedRelation, canon_relation
+
+_JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
 
 EntityType = Literal[
     "Disease",
@@ -52,21 +56,9 @@ _MULTI_PUNCT = re.compile(r"[;,]{1,}")
 
 _BAD_SINGLE = {"A", "B", "C", "D"}
 
-_MAX_ENTITY_TOKENS = 12
+_MAX_ENTITY_TOKENS = 6
 _MAX_ENTITY_CHARS = 100
 
-_BAD_ENTITY_PATTERNS = [
-    r"\bpatients?\b",
-    r"\bwho\b",
-    r"\bwhich\b",
-    r"\bthat\b",
-    r"\bundergoing\b",
-    r"\bas part of\b",
-    r"\bevaluation of\b",
-    r"\bin order to\b",
-    r"\bresult(s)? in\b",
-    r"\blead(s)? to\b",
-]
 
 # Relations, die du initial als Startset geben willst, du kannst das weiterhin zentral pflegen.
 _DEFAULT_ALLOWED_RELATIONS: Set[str] = {
@@ -108,6 +100,36 @@ _REL_LABEL_RULES: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _extract_first_json_object(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    m = _JSON_OBJ.search(text)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+def _coerce_list_of_dicts(x: Any) -> List[dict]:
+    if not isinstance(x, list):
+        return []
+    return [t for t in x if isinstance(t, dict)]
+
+def _filter_valid_triples_dicts(triples: List[dict]) -> List[dict]:
+    req = ["subject", "subject_label", "relation", "object", "object_label"]
+    out: List[dict] = []
+    for t in triples:
+        ok = True
+        for k in req:
+            v = t.get(k)
+            if not isinstance(v, str) or not v.strip():
+                ok = False
+                break
+        if ok:
+            out.append(t)
+    return out
+
 def _norm_text(s: str) -> str:
     s = (s or "").strip()
     s = s.replace("\u00a0", " ")
@@ -134,10 +156,6 @@ def _looks_like_sentence_fragment(s: str) -> bool:
         return True
     if _MULTI_PUNCT.search(t):
         return True
-    low = t.lower()
-    for p in _BAD_ENTITY_PATTERNS:
-        if re.search(p, low):
-            return True
     return False
 
 
@@ -292,14 +310,12 @@ class KGTripletExtractor:
         llm_client: LLMClient,
         relation_registry: RelationRegistry,
         max_retries: int = 1,
-        max_new_relations_per_chunk: int = 3,
         auto_accept_new_relations: bool = True,
         alias_threshold: float = 0.88,
     ):
         self.llm_client = llm_client
         self.registry = relation_registry
         self.max_retries = max(0, int(max_retries))
-        self.max_new_relations_per_chunk = max(0, int(max_new_relations_per_chunk))
         self.auto_accept_new_relations = bool(auto_accept_new_relations)
         self.alias_threshold = float(alias_threshold)
 
@@ -320,40 +336,43 @@ class KGTripletExtractor:
         rels = "\n".join([f"- {x}" for x in self.registry.snapshot_allowed_sorted()])
 
         return f"""
-You are an expert biomedical information extractor.
+                You are an expert biomedical information extractor.
 
-Extract knowledge graph triples from the medical text.
+                Extract knowledge graph triples from the medical text.
 
-Valid Entity Types (Labels):
-{labels}
+                Valid Entity Types (Labels):
+                {labels}
 
-Allowed Relationship Types (Preferred):
-{rels}
+                Allowed Relationship Types (Preferred):
+                {rels}
 
-Rules:
-1. Extract triples only if both entities are explicitly mentioned in the text.
-2. Prefer using an existing relation from the Allowed Relationship Types list.
-3. If none of the allowed relations fits semantically, propose a new relation.
-   - New relation must be UPPER_SNAKE_CASE, short, unambiguous.
-   - Provide a one sentence description.
-4. Avoid duplicates and redundant triples.
-5. Entities must be short noun phrases, not full sentences.
-   - Max 12 words and max 100 characters.
-   - Do not include sentence punctuation inside entities.
-6. Do not infer facts not stated in the text.
-7. Propose at most {self.max_new_relations_per_chunk} new relations.
+                Rules:
+                1. Extract triples only if both entities are explicitly mentioned in the text.
+                2. Prefer using an existing relation from the Allowed Relationship Types list.
+                3. If none of the allowed relations fits semantically, propose a new relation.
+                - New relation must be UPPER_SNAKE_CASE, short, unambiguous.
+                4. Avoid duplicates and redundant triples.
+                5. Entities must be short noun phrases, not full sentences.
+                - Max {_MAX_ENTITY_TOKENS} words.
+                - Do not include sentence punctuation inside entities.
+                6. Do not infer facts not stated in the text.
+                
+                Important:
+                - Only output complete triple objects. Do not output partial objects.
+                - If you cannot fill in a triple completely, omit it entirely.
 
-Return strictly structured JSON according to the provided schema.
+                Return strictly structured JSON according to the following schema:
+                {json.dumps(KGExtractionOutput.model_json_schema(), ensure_ascii=False, indent=2)}
 
-Context:
-Title: {title}
-Source: {source}
-Source filename: {source_filename}
-Chunk ID: {chunk_id}
+                Context:
+                Title: {title}
+                Source: {source}
+                Source filename: {source_filename}
+                Chunk ID: {chunk_id}
 
-Text:
-{text}
-""".strip()
+                Text:
+                {text}
+                """
 
     def _finalize(
         self,
@@ -365,8 +384,7 @@ Text:
         meta0 = doc.metadata or {}
         text = (doc.page_content or "").strip()
 
-        # handle proposed relations
-        for pr in (out.new_relations or [])[: self.max_new_relations_per_chunk]:
+        for pr in (out.new_relations or []):
             proposed = ProposedRelation(
                 name=pr.name,
                 description=_norm_text(pr.description),
@@ -378,7 +396,6 @@ Text:
             if not cname:
                 continue
             if self.auto_accept_new_relations:
-                # accept canonical, keep original as alias too
                 aliases = []
                 raw_name = canon_relation(pr.name)
                 if raw_name and raw_name != cname:
@@ -456,19 +473,44 @@ Text:
 
         for _ in range(self.max_retries + 1):
             prompt = self._prompt(doc, chunk_id=chunk_id, source=source)
-            resp = structured_llm.invoke(prompt)
 
-            # LangChain gibt hier typischerweise schon ein Pydantic Objekt zurück
-            out: KGExtractionOutput
-            if isinstance(resp, KGExtractionOutput):
-                out = resp
-            else:
-                # Fallback, falls Provider raw dict zurückgibt
-                out = KGExtractionOutput.model_validate(resp)
+            try:
+                resp = structured_llm.invoke(prompt)
+                print(resp)
+
+                out: KGExtractionOutput
+                if isinstance(resp, KGExtractionOutput):
+                    out = resp
+                else:
+                    out = KGExtractionOutput.model_validate(resp)
+
+            except (OutputParserException, ValidationError) as e:
+                last_raw = str(e)
+
+                raw_obj = _extract_first_json_object(last_raw)
+                if not isinstance(raw_obj, dict):
+                    continue
+
+                triples_dicts = _coerce_list_of_dicts(raw_obj.get("triples"))
+                triples_dicts = _filter_valid_triples_dicts(triples_dicts)
+
+                newrels_dicts = _coerce_list_of_dicts(raw_obj.get("new_relations"))
+
+                if not triples_dicts and not newrels_dicts:
+                    continue
+
+                try:
+                    out = KGExtractionOutput.model_validate(
+                        {"triples": triples_dicts, "new_relations": newrels_dicts, "notes": raw_obj.get("notes")}
+                    )
+                except Exception:
+                    continue
+
+            except Exception as e:
+                last_raw = str(e)
+                continue
 
             last_parsed = out.model_dump()
-            last_raw = ""  # structured, kein Rohtext nötig
-
             triples = self._finalize(out, doc=doc, chunk_id=chunk_id, source=source)
             if triples:
                 return TripletExtractionResult(triples=triples, raw=last_raw, parsed=last_parsed)

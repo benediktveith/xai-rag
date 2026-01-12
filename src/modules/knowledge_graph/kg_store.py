@@ -1,7 +1,9 @@
+# src/modules/knowledge_graph/kg_store.py
+
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 import networkx as nx
 
@@ -36,8 +38,14 @@ class KGStore:
     """
     KG Store als MultiDiGraph.
 
-    - Eine Kante pro (u, v, relation_key), verhindert Relation Mixing.
-    - Observations sind die kanonische Quelle fuer alles.
+    Wichtige Änderung für inkrementelles Speichern:
+    - Zusätzlich zum Snapshot Format (save_jsonl) unterstützt dieser Store ein Event Log Format,
+      das pro neuem KGTriple eine JSONL Zeile appendet.
+    - load_jsonl kann beide Formate lesen, Snapshot Zeilen und Event Zeilen.
+
+    Vorteil:
+    - Der Build kann nach jedem Triple sicher persistieren, ohne den kompletten Graphen neu zu schreiben.
+    - Beim Laden werden Event Zeilen einfach replayed und in denselben Aggregationsmechanismus gemerged.
     """
 
     def __init__(self):
@@ -86,7 +94,7 @@ class KGStore:
     def edge_attr(self, u: str, v: str, relation_key: Optional[str] = None) -> Optional[dict]:
         """
         Gibt Edge Attribute zurück.
-        - Wenn relation_key None: gibt die erste Kante (beliebig) zurück, falls vorhanden.
+        - Wenn relation_key None: gibt die erste Kante zurück, falls vorhanden.
         - Wenn relation_key gesetzt: gibt genau diese Kante zurück.
         """
         if not u or not v:
@@ -114,17 +122,17 @@ class KGStore:
             if not u or not v:
                 continue
 
-            rel = _norm_text(t.relation)
+            rel = _norm_text(getattr(t, "relation", "") or "")
             if not rel:
                 continue
 
-            src = _norm_text(t.source)
-            cid = _norm_text(t.chunk_id)
-            meta = t.meta if isinstance(t.meta, dict) else {}
+            src = _norm_text(getattr(t, "source", "") or "")
+            cid = _norm_text(getattr(t, "chunk_id", "") or "")
+            meta = t.meta if isinstance(getattr(t, "meta", None), dict) else {}
 
             obs = {"relation": rel, "source": src, "chunk_id": cid, "meta": meta}
 
-            key = rel  # Relation als Edge-Key, verhindert Mixing
+            key = rel  # Relation als Edge Key, verhindert Mixing
 
             if self.g.has_edge(u, v, key=key):
                 data = dict(self.g.get_edge_data(u, v, key) or {})
@@ -161,7 +169,54 @@ class KGStore:
                     chunk_ids=[cid] if cid else [],
                 )
 
+    def append_jsonl_events(self, path: Path, triples: Iterable[KGTriple], *, flush: bool = True) -> int:
+        """
+        Appendet pro KGTriple eine JSONL Zeile im Event Format.
+
+        Event Format Zeile:
+        {
+          "schema": "kg_event_v1",
+          "subject": "...",
+          "object": "...",
+          "relation": "...",
+          "subject_type": "...",
+          "object_type": "...",
+          "source": "...",
+          "chunk_id": "...",
+          "meta": {...}
+        }
+
+        Das ist bewusst nicht das Snapshot Format von save_jsonl, weil Snapshot Updates bei bestehenden Kanten
+        sonst eine komplette Datei Rewrite Operation erfordern würden.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        written = 0
+        with open(path, "a", encoding="utf-8") as f:
+            for t in triples:
+                rec = {
+                    "schema": "kg_event_v1",
+                    "subject": str(getattr(t, "subject", "") or ""),
+                    "object": str(getattr(t, "object", "") or ""),
+                    "relation": str(getattr(t, "relation", "") or ""),
+                    "subject_type": str(getattr(t, "subject_type", "") or "Unknown"),
+                    "object_type": str(getattr(t, "object_type", "") or "Unknown"),
+                    "source": str(getattr(t, "source", "") or ""),
+                    "chunk_id": str(getattr(t, "chunk_id", "") or ""),
+                    "meta": t.meta if isinstance(getattr(t, "meta", None), dict) else {},
+                }
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                written += 1
+
+            if flush:
+                f.flush()
+
+        return written
+
     def save_jsonl(self, path: Path) -> None:
+        """
+        Snapshot Export, schreibt den aktuellen aggregierten Graph Zustand.
+        Dieses Format entspricht deinem bisherigen save_jsonl, bleibt kompatibel.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             for u, v, key, data in self.g.edges(keys=True, data=True):
@@ -186,13 +241,53 @@ class KGStore:
                 }
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
-    def load_jsonl(self, path: Path) -> None:
+    def load_jsonl(self, path: Path, *, ignore_bad_lines: bool = True) -> None:
+        """
+        Lädt JSONL in den Graph.
+
+        Unterstützt zwei Formate:
+        1) Snapshot Format Zeilen mit Feldern wie u,v,key,observations,...
+        2) Event Format Zeilen mit schema == kg_event_v1 und Feldern subject,object,relation,...
+
+        ignore_bad_lines:
+        - True überspringt kaputte JSON Zeilen, wichtig wenn ein Prozess beim Append abstürzt.
+        """
         self.g.clear()
         self._alias_by_canon.clear()
 
+        if not path.exists():
+            return
+
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
-                rec = json.loads(line)
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    if ignore_bad_lines:
+                        continue
+                    raise
+
+                if isinstance(rec, dict) and rec.get("schema") == "kg_event_v1":
+                    t = KGTriple(
+                        subject=str(rec.get("subject", "") or ""),
+                        relation=str(rec.get("relation", "") or ""),
+                        object=str(rec.get("object", "") or ""),
+                        subject_type=str(rec.get("subject_type", "") or "Unknown"),
+                        object_type=str(rec.get("object_type", "") or "Unknown"),
+                        source=str(rec.get("source", "") or ""),
+                        chunk_id=str(rec.get("chunk_id", "") or ""),
+                        meta=rec.get("meta") if isinstance(rec.get("meta"), dict) else {},
+                    )
+                    self.add_triples([t])
+                    continue
+
+                # Snapshot Format
+                if not isinstance(rec, dict):
+                    continue
 
                 u = self._ensure_node(str(rec.get("u", "")), str(rec.get("u_type", "Unknown")))
                 v = self._ensure_node(str(rec.get("v", "")), str(rec.get("v_type", "Unknown")))
@@ -226,7 +321,12 @@ class KGStore:
                     else:
                         for m in metas:
                             observations.append(
-                                {"relation": relation, "source": src0, "chunk_id": cid0, "meta": m if isinstance(m, dict) else {}}
+                                {
+                                    "relation": relation,
+                                    "source": src0,
+                                    "chunk_id": cid0,
+                                    "meta": m if isinstance(m, dict) else {},
+                                }
                             )
 
                 if not key:

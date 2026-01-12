@@ -189,16 +189,25 @@ class MedMCQADataLoader:
             return None
 
     def _select_with_seed(self, data: List[Dict[str, Any]], limit: int, seed: int) -> List[Dict[str, Any]]:
+        """
+        Does not select with seed random anymore, now it just selects the allowed_ids and limits them with :param limit.
+        """
+        data = [data[i] for i in range(len(data)) if data[i].get("id") in self.allowed_ids]
+
         if limit >= len(data):
-            return list(data)
-        indices = list(range(len(data)))
-        random.Random(seed).shuffle(indices)
-        indices = indices[:limit]
+            return data
         
-        if len(self.allowed_ids) == 0:
-            return [data[i] for i in indices]
+        return data[:limit]
+
+        ### Random Logic ###
+        # indices = list(range(len(data)))
+        # random.Random(seed).shuffle(indices)
+        # indices = indices[:limit]
         
-        return [data[i] for i in indices if data[i].get("id") in self.allowed_ids]
+        # if len(self.allowed_ids) == 0:
+        #     return [data[i] for i in indices]
+        
+        # return [data[i] for i in indices if data[i].get("id") in self.allowed_ids]
 
     def _to_documents(self, data, split: str):
         from langchain_core.documents import Document

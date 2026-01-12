@@ -1,11 +1,12 @@
-# src/modules/kgrag_ex_explainer.py
+# src/modules/knowledge_graph/kgrag_ex_explainer.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Tuple
 
 from src.modules.knowledge_graph.kgrag_ex_pipeline import KGRAGExPipeline, KGRAGRun
-from src.modules.knowledge_graph.kgrag_ex_perturbations import KGPerturbationFactory, ChainPerturbation
+from src.modules.knowledge_graph.kgrag_ex_perturbations import KGPerturbationFactory
 from src.modules.knowledge_graph.kg_store import KGStore
 
 import networkx as nx
@@ -13,46 +14,45 @@ import networkx as nx
 
 @dataclass(frozen=True)
 class RQ1Sensitivity:
-    # counts of perturbations that changed the answer
     node_changed: int
     edge_changed: int
     subpath_changed: int
-    # totals
     node_total: int
     edge_total: int
     subpath_total: int
 
+
 @dataclass(frozen=True)
 class RQ2PositionRecord:
-    kind: str               # "node" | "edge" | "subpath"
+    kind: str
     removed: str
-    index: int              # position index in its list
-    rel_pos: float          # normalized 0..1
+    index: int
+    rel_pos: float
     answer_changed: bool
+
 
 @dataclass(frozen=True)
 class RQ3NodeTypeRecord:
     node: str
-    node_type: str          # e.g. Disease, BodyPart
+    node_type: str
     answer_changed: bool
+
 
 @dataclass(frozen=True)
 class RQ4MetricsRecord:
-    kind: str               # "node" | "edge" | "subpath"
+    kind: str
     removed: str
     answer_changed: bool
 
-    # node metrics
     node_degree: Optional[int] = None
-    node_degree_rank_rel: Optional[float] = None   # 0 best, 1 worst
+    node_degree_rank_rel: Optional[float] = None
 
-    # edge metrics
     edge_betweenness: Optional[float] = None
     edge_betweenness_rank_rel: Optional[float] = None
 
-    # subpath metric
     subpath_score: Optional[float] = None
     subpath_score_rank_rel: Optional[float] = None
+
 
 @dataclass
 class KGRAGExplainReport:
@@ -71,7 +71,6 @@ class KGRAGExplainReport:
     rq4_graph_metrics: Optional[List[RQ4MetricsRecord]] = None
 
 
-
 @dataclass(frozen=True)
 class PerturbationOutcome:
     kind: str
@@ -81,13 +80,13 @@ class PerturbationOutcome:
     answer: str
     answer_changed: bool
     important_entities: List[str]
-    
-    
-    
+
+
 def _safe_rel_pos(idx: int, n: int) -> float:
     if n <= 1:
         return 0.0
     return float(idx) / float(n - 1)
+
 
 def _parse_edge_removed(removed: str) -> Optional[tuple[str, str, str]]:
     parts = (removed or "").split("::")
@@ -95,8 +94,8 @@ def _parse_edge_removed(removed: str) -> Optional[tuple[str, str, str]]:
         return None
     return parts[0], parts[1], parts[2]
 
+
 def _parse_subpath_removed(removed: str) -> Optional[tuple[str, str, str]]:
-    # expects "(u, rel, v)"
     s = (removed or "").strip()
     if not (s.startswith("(") and s.endswith(")")):
         return None
@@ -116,40 +115,26 @@ def _relative_rank(value: float, values: List[float], higher_is_better: bool = T
     try:
         idx = uniq.index(value)
     except ValueError:
-        # if value not found due to float noise, fallback to nearest
         idx = min(range(len(uniq)), key=lambda i: abs(uniq[i] - value))
     return float(idx) / float(len(uniq) - 1)
 
 
-
 class KGRAGExExplainer:
     """
-    Paper-nah:
-    - Erzeuge Perturbationen auf Chain Ebene (node, edge, subpath) mit "__"
-    - LLM generiert Pseudoparagraphen für jede perturbed chain
-    - LLM beantwortet erneut, Vergleich zur Base Antwort
+    Paper nah:
+    - Perturbations verändern KG chain
+    - Daraus wird pseudo paragraph generiert
+    - Retrieval läuft ausschließlich über pseudo paragraph, nicht über question
+    - Answer wird auf Basis retrieved docs plus question generiert
     """
 
     def __init__(self, pipeline: KGRAGExPipeline, betweenness_k: int = 0, betweenness_seed: int = 7):
         self.pipeline = pipeline
         self.factory = KGPerturbationFactory()
-        self.betweenness_k = int(betweenness_k)          # 0 means exact
+        self.betweenness_k = int(betweenness_k)
         self.betweenness_seed = int(betweenness_seed)
         self._edge_betweenness_cache: Optional[Dict[Tuple[str, str], float]] = None
 
-
-    def _pseudo_paragraph(self, chain_str: str) -> str:
-        if not chain_str:
-            return ""
-        txt, _ = self.pipeline._generate_pseudo_paragraph(chain_str)
-        return txt
-
-    def _answer(self, paragraph: str, question: str, options: str) -> str:
-        if not paragraph:
-            return ""
-        ans, _ = self.pipeline._answer_from_paragraph(paragraph, question, options)
-        return ans
-    
     def _rq1(self, outcomes: List[PerturbationOutcome]) -> RQ1Sensitivity:
         def _counts(kind: str) -> tuple[int, int]:
             xs = [o for o in outcomes if o.kind == kind]
@@ -159,15 +144,19 @@ class KGRAGExExplainer:
         ec, et = _counts("edge")
         sc, st = _counts("subpath")
         return RQ1Sensitivity(
-            node_changed=nc, edge_changed=ec, subpath_changed=sc,
-            node_total=nt, edge_total=et, subpath_total=st,
+            node_changed=nc,
+            edge_changed=ec,
+            subpath_changed=sc,
+            node_total=nt,
+            edge_total=et,
+            subpath_total=st,
         )
 
     def _rq2(self, run: KGRAGRun, outcomes: List[PerturbationOutcome]) -> List[RQ2PositionRecord]:
         pl = run.path_lists
         nodes = pl.node_list or []
         edges = pl.edge_list or []
-        subs  = pl.subpath_list or []
+        subs = pl.subpath_list or []
 
         out: List[RQ2PositionRecord] = []
 
@@ -208,7 +197,7 @@ class KGRAGExExplainer:
                 out.append(RQ2PositionRecord(o.kind, o.removed, idx, rel_pos, o.answer_changed))
 
         return out
-    
+
     def _rq3(self, kg: KGStore, outcomes: List[PerturbationOutcome]) -> List[RQ3NodeTypeRecord]:
         out: List[RQ3NodeTypeRecord] = []
         for o in outcomes:
@@ -218,7 +207,6 @@ class KGRAGExExplainer:
             ntype = kg.node_type(n) if n in kg.g else "Unknown"
             out.append(RQ3NodeTypeRecord(node=n, node_type=str(ntype), answer_changed=o.answer_changed))
         return out
-    
 
     def _edge_betweenness(self) -> Dict[Tuple[str, str], float]:
         if self._edge_betweenness_cache is not None:
@@ -253,17 +241,15 @@ class KGRAGExExplainer:
         pl = run.path_lists
         nodes = pl.node_list or []
         edges = pl.edge_list or []
-        subs  = pl.subpath_list or []
+        subs = pl.subpath_list or []
 
-        # Node degrees in KG, use undirected degree for comparability
         G_und = kg.g.to_undirected(as_view=True)
         node_degrees: Dict[str, int] = {n: int(G_und.degree(n)) for n in nodes if n in G_und}
         node_degree_vals = [float(v) for v in node_degrees.values()]
 
-        # Edge betweenness from cache
         eb = self._edge_betweenness()
         edge_b_vals: List[float] = []
-        edge_b_map: Dict[Tuple[str, str, str], float] = {}  # (u,rel,v) -> betweenness
+        edge_b_map: Dict[Tuple[str, str, str], float] = {}
         for i in range(len(edges)):
             if i + 1 >= len(nodes):
                 continue
@@ -273,7 +259,6 @@ class KGRAGExExplainer:
             edge_b_map[(u, rel, v)] = val
             edge_b_vals.append(val)
 
-        # Subpath scores
         sub_scores: Dict[Tuple[str, str, str], float] = {}
         sub_vals: List[float] = []
         for (u, rel, v) in subs:
@@ -294,10 +279,15 @@ class KGRAGExExplainer:
                 deg_rank = None
                 if deg is not None and node_degree_vals:
                     deg_rank = _relative_rank(float(deg), node_degree_vals, higher_is_better=True)
-                out.append(RQ4MetricsRecord(
-                    kind="node", removed=o.removed, answer_changed=o.answer_changed,
-                    node_degree=deg, node_degree_rank_rel=deg_rank,
-                ))
+                out.append(
+                    RQ4MetricsRecord(
+                        kind="node",
+                        removed=o.removed,
+                        answer_changed=o.answer_changed,
+                        node_degree=deg,
+                        node_degree_rank_rel=deg_rank,
+                    )
+                )
 
             elif o.kind == "edge":
                 parsed = _parse_edge_removed(o.removed)
@@ -308,10 +298,15 @@ class KGRAGExExplainer:
                 b_rank = None
                 if b is not None and edge_b_vals:
                     b_rank = _relative_rank(float(b), edge_b_vals, higher_is_better=True)
-                out.append(RQ4MetricsRecord(
-                    kind="edge", removed=o.removed, answer_changed=o.answer_changed,
-                    edge_betweenness=b, edge_betweenness_rank_rel=b_rank,
-                ))
+                out.append(
+                    RQ4MetricsRecord(
+                        kind="edge",
+                        removed=o.removed,
+                        answer_changed=o.answer_changed,
+                        edge_betweenness=b,
+                        edge_betweenness_rank_rel=b_rank,
+                    )
+                )
 
             elif o.kind == "subpath":
                 parsed = _parse_subpath_removed(o.removed)
@@ -322,10 +317,15 @@ class KGRAGExExplainer:
                 s_rank = None
                 if score is not None and sub_vals:
                     s_rank = _relative_rank(float(score), sub_vals, higher_is_better=True)
-                out.append(RQ4MetricsRecord(
-                    kind="subpath", removed=o.removed, answer_changed=o.answer_changed,
-                    subpath_score=score, subpath_score_rank_rel=s_rank,
-                ))
+                out.append(
+                    RQ4MetricsRecord(
+                        kind="subpath",
+                        removed=o.removed,
+                        answer_changed=o.answer_changed,
+                        subpath_score=score,
+                        subpath_score_rank_rel=s_rank,
+                    )
+                )
 
         return out
 
@@ -334,7 +334,6 @@ class KGRAGExExplainer:
         base_chain = run.kg_chain or ""
         base_paragraph = run.kg_paragraph or ""
 
-        # if no KG path, nothing to perturb, paper fallback behavior
         if not (run.path_lists and run.path_lists.node_list):
             return KGRAGExplainReport(
                 base_answer=base_answer,
@@ -352,6 +351,7 @@ class KGRAGExExplainer:
         for p in perturbations:
             par, _ = self.pipeline._generate_pseudo_paragraph(p.chain_str)
 
+            # Paper konform, Retrieval query ist pseudo paragraph, Answer nutzt question plus retrieved docs
             ans, _, _ = self.pipeline._rag_answer_with_optional_kg_paragraph(
                 question=run.question,
                 kg_paragraph=par,
@@ -375,7 +375,7 @@ class KGRAGExExplainer:
         most_node = next((o.removed for o in outcomes if o.kind == "node" and o.answer_changed), None)
         most_edge = next((o.removed for o in outcomes if o.kind == "edge" and o.answer_changed), None)
         most_sub = next((o.removed for o in outcomes if o.kind == "subpath" and o.answer_changed), None)
-        
+
         rq1 = self._rq1(outcomes)
         rq2 = self._rq2(run, outcomes)
         rq3 = self._rq3(self.pipeline.kg, outcomes)

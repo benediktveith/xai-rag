@@ -1,3 +1,5 @@
+# src/modules/knowledge_graph/kg_path_service.py
+
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -22,7 +24,9 @@ class KGPathService:
     Liefert:
       - shortest_path_nodes: Knotenpfad (undirected)
       - shortest_path: eine deterministische Variante (best edge pro hop)
-      - shortest_path_variants: mehrere Kantenvarianten je hop, daraus mehrere Chains
+
+    Hinweis, Varianten sind hier weiterhin vorhanden für andere Teile deines Codes,
+    die Notebook konforme Pipeline nutzt sie nicht mehr.
     """
 
     def __init__(self, kg: KGStore):
@@ -41,13 +45,6 @@ class KGPathService:
             return []
 
     def _score_edge_data(self, data: Dict[str, Any]) -> Tuple[int, int, str]:
-        """
-        Höher ist besser.
-        Priorität:
-          1) hat non synthetic observations
-          2) mehr observations
-          3) relation label tie break
-        """
         d = dict(data or {})
         rel = str(d.get("relation") or "").strip()
 
@@ -64,10 +61,6 @@ class KGPathService:
         return (has_nonsynth, obs_n, rel)
 
     def _candidate_edges_between(self, u: str, v: str, top_n: int = 3) -> List[Tuple[str, Dict[str, Any]]]:
-        """
-        Liefert bis zu top_n Kandidaten für die Relation zwischen u und v.
-        Return: Liste aus (relation_label, edge_data)
-        """
         if not u or not v:
             return [("related_to", {})]
 
@@ -99,9 +92,6 @@ class KGPathService:
         return self._candidate_edges_between(u, v, top_n=1)[0]
 
     def shortest_path(self, start: str, end: str, cutoff: Optional[int] = None) -> List[KGStep]:
-        """
-        Single best variant, kompatibel zu deinem bisherigen Verhalten.
-        """
         nodes = self.shortest_path_nodes(start, end, cutoff=cutoff)
         if len(nodes) < 2:
             return []
@@ -155,17 +145,11 @@ class KGPathService:
         per_hop_top_n: int = 3,
         max_chains: int = 12,
     ) -> List[PathAsLists]:
-        """
-        Liefert mehrere alternative Chains für denselben Knotenpfad.
-        Kombinatorische Explosion wird begrenzt durch per_hop_top_n und max_chains.
-        """
         nodes = self.shortest_path_nodes(start, end, cutoff=cutoff)
         if len(nodes) < 2:
             return []
 
-        # Für jedes Hop: Kandidaten edges ermitteln
         hop_candidates: List[List[Tuple[str, Dict[str, Any], str, str]]] = []
-        # element: (rel, edge_data, u, v) in gerichteter Richtung
         for a, b in zip(nodes[:-1], nodes[1:]):
             if self.kg.g.has_edge(a, b):
                 u, v = a, b
@@ -177,7 +161,6 @@ class KGPathService:
             cands = self._candidate_edges_between(u, v, top_n=per_hop_top_n)
             hop_candidates.append([(rel, ed, u, v) for (rel, ed) in cands])
 
-        # Cartesian product, aber früh abbrechen bei max_chains
         variants: List[List[KGStep]] = [[]]
         for hop in hop_candidates:
             new_variants: List[List[KGStep]] = []

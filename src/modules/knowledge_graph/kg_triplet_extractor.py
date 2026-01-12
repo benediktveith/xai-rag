@@ -476,6 +476,7 @@ class KGTripletExtractor:
 
             try:
                 resp = structured_llm.invoke(prompt)
+                print(resp)
 
                 out: KGExtractionOutput
                 if isinstance(resp, KGExtractionOutput):

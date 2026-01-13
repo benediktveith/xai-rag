@@ -44,6 +44,7 @@ class MultiHopRAGEngine:
         print(f"--- Starting Multi-Hop Search for: '{initial_query}' ---")
 
         all_documents = []
+        retrieved_document_ids = []
         for i in range(self.num_hops):
             hop_number = i + 1
             print(f"\n[ Hop {hop_number} ]")
@@ -59,7 +60,11 @@ class MultiHopRAGEngine:
             top_doc = retrieved_docs[0]
             lowest_doc = retrieved_docs[-1] # also track the lowest ranked document
             context_docs = retrieved_docs[:min(4,len(retrieved_docs))]
-            all_documents.extend(retrieved_docs)
+
+            # Deduplicate documents
+            new_docs = [doc for doc in retrieved_docs if doc.id not in retrieved_document_ids]
+            all_documents.extend(new_docs)
+            retrieved_document_ids.extend([doc.id for doc in new_docs])
 
             # 2. Store the results of this hop in our trace
             hop_info = {

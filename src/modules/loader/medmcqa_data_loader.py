@@ -44,6 +44,7 @@ class MedMCQADataLoader:
         split: str = "train",
         as_documents: bool = True,
         limit: Optional[int] = None,
+        ids: List[str] = None,
     ) -> List[Any]:
         split = split.lower().strip()
         if split == "val":
@@ -51,7 +52,10 @@ class MedMCQADataLoader:
 
         config = self._load_config()
         config_medmcqa = config.get("medmcqa", {}) if isinstance(config.get("medmcqa"), dict) else {}
-        self.allowed_ids = config_medmcqa.get("question_ids", [])
+        if ids is not None:
+            self.allowed_ids = ids
+        else:
+            self.allowed_ids = config_medmcqa.get("question_ids", [])
 
         seed = self._coerce_int(
             config_medmcqa.get("seed")

@@ -11,14 +11,11 @@
 
 ### Metriken (Quantitativ)
 
-- Faithfulness (NLI Score): We employ Natural Language Inference to determine if the generated answer is logically entailed by the retrieved snippets ensuring the explanation is not a "persuasive hallucination."
+- Keinen einheitlichen Score für alle. Jeder bewertet auf seine Art aus dem Paper / Idee.
 
-- Interpretability (Jaccard Coefficient): We use the Jaccard similarity to measure the overlap between system-generated highlights and annotated evidence.
+- Welche Dokumente waren für die Erklärung am wichtigsten? (kg_capable fragen)
+- Bene / Jan vergleichen (highlighting an den selben stellen?)
+
+- Plus was lief gut / was lief schlecht
 
 - Efficiency: Measured via response latency and token consumption to assess the overhead of generating explanations.
-
-### Metriken (Qualitativ)
-
-- perceived trust
-- usefulness
-- satisfaction

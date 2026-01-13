@@ -37,6 +37,10 @@ def _token_set(s: str) -> set[str]:
     return set([t for t in s.split() if t])
 
 
+def _pair_key(a: str, b: str) -> tuple[str, str]:
+    ca, cb = _canon_text(a), _canon_text(b)
+    return (ca, cb) if ca <= cb else (cb, ca)
+
 class KGQueryService:
     def __init__(self, kg: KGStore, llm_client: Optional[LLMClient] = None):
         self.kg = kg
@@ -54,37 +58,37 @@ class KGQueryService:
             if c and c not in self._node_by_canon:
                 self._node_by_canon[c] = n
 
+
     def extract_entities(self, question: str) -> QueryEntities:
         """
         Notebook nah:
-        - LLM extrahiert Entity Paare
-        - Zusätzlich Entities Liste, für Fallback Kombinationen
-        Fallback ohne LLM:
-        - Entities per KG string match und token overlap
-        - Pairs als Kombinationen aus Entities
+        - LLM extrahiert Entities, optional Pairs
+        - Danach: Pairs werden immer auf alle Kombinationen der Entities ergänzt
+        (damit bei 3 Entities auch 3 Paare entstehen, sofern alle 3 Entities existieren)
         """
-        # 1) LLM Pfad, liefert Entities und Pairs
         if self.llm_client:
             llm = self.llm_client.get_llm()
             if llm is not None:
                 prompt = f"""
-Return ONLY JSON, no extra text.
+    Return ONLY JSON, no extra text.
 
-Schema:
-{{
-  "entities": ["...", "..."],
-  "pairs": [["...", "..."], ["...", "..."]]
-}}
+    Schema:
+    {{
+    "entities": ["...", "..."],
+    "pairs": [["...", "..."], ["...", "..."]]
+    }}
 
-Task:
-Extract central medical entities AND medically relevant entity pairs from the question.
-Entities must be short noun phrases.
-Pairs must be two distinct entities.
-Do not output answer options or single letters.
+    Task:
+    Extract central medical entities from the question.
+    Entities must be short noun phrases.
+    Do not output answer options or single letters.
 
-Question:
-{question}
-""".strip()
+    Additionally:
+    You MAY output pairs, but the system will consider all pairwise combinations of the extracted entities anyway.
+
+    Question:
+    {question}
+    """.strip()
 
                 resp = llm.invoke(prompt)
                 raw = (getattr(resp, "content", str(resp)) or "").strip()
@@ -100,7 +104,7 @@ Question:
                             s = str(x).strip()
                             if len(s) == 1 and s.upper() in {"A", "B", "C", "D"}:
                                 continue
-                            if s:
+                            if s and s not in ents_out:
                                 ents_out.append(s)
 
                     prs = parsed.get("pairs")
@@ -110,39 +114,39 @@ Question:
                                 continue
                             a = str(p[0]).strip()
                             b = str(p[1]).strip()
-                            if not a or not b:
+                            if not a or not b or a == b:
                                 continue
                             if len(a) == 1 and a.upper() in {"A", "B", "C", "D"}:
                                 continue
                             if len(b) == 1 and b.upper() in {"A", "B", "C", "D"}:
                                 continue
-                            if a == b:
-                                continue
                             pairs_out.append((a, b))
 
-                # Pairs deduplizieren, Reihenfolge stabil halten
-                seen = set()
-                pairs_dedup: List[Tuple[str, str]] = []
+                # Entities zusätzlich aus Pairs ergänzen
                 for a, b in pairs_out:
-                    key = (_canon_text(a), _canon_text(b))
+                    if a and a not in ents_out:
+                        ents_out.append(a)
+                    if b and b not in ents_out:
+                        ents_out.append(b)
+
+                # Jetzt: alle Kombinationen aus Entities als Paare ergänzen
+                all_pairs = list(combinations(ents_out, 2))
+
+                # Merge: LLM Paare + Kombinations Paare, symmetrisch deduplizieren, Reihenfolge stabil
+                seen = set()
+                pairs_final: List[Tuple[str, str]] = []
+
+                for a, b in pairs_out + all_pairs:
+                    key = _pair_key(a, b)
                     if key in seen:
                         continue
                     seen.add(key)
-                    pairs_dedup.append((a, b))
+                    pairs_final.append((a, b))
 
-                # Entities zusätzlich aus Pairs ergänzen, damit Fallback mehr Material hat
-                if pairs_dedup:
-                    for a, b in pairs_dedup:
-                        if a and a not in ents_out:
-                            ents_out.append(a)
-                        if b and b not in ents_out:
-                            ents_out.append(b)
+                return QueryEntities(entities=ents_out, pairs=pairs_final)
 
-                return QueryEntities(entities=ents_out, pairs=pairs_dedup)
-
-        # 2) Heuristik Pfad ohne LLM
+        # 2) Heuristik Pfad ohne LLM bleibt wie bei dir
         q = _canon_text(question)
-
         hits = [self._node_names[n] for n in self._nodes if self._node_canon_name[n] and self._node_canon_name[n] in q]
 
         if len(hits) < 2:
@@ -155,7 +159,6 @@ Question:
             scored.sort(key=lambda x: x[0], reverse=True)
             hits = [x[1] for x in scored[:8]]
 
-        # Pairs als Kombinationen, wie im Autoren Notebook Prinzip
         pairs = [(a, b) for a, b in combinations(hits, 2)]
         return QueryEntities(entities=hits, pairs=pairs)
 

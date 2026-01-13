@@ -23,10 +23,10 @@ class KGPathService:
 
     Liefert:
       - shortest_path_nodes: Knotenpfad (undirected)
-      - shortest_path: eine deterministische Variante (best edge pro hop)
+      - shortest_path: deterministische Variante, respektiert Kantenrichtung
 
-    Hinweis, Varianten sind hier weiterhin vorhanden für andere Teile deines Codes,
-    die Notebook konforme Pipeline nutzt sie nicht mehr.
+    Hinweis, Varianten sind weiterhin vorhanden für andere Teile deines Codes,
+    die Notebook konforme Pipeline nutzt sie nicht.
     """
 
     def __init__(self, kg: KGStore):
@@ -92,21 +92,28 @@ class KGPathService:
         return self._candidate_edges_between(u, v, top_n=1)[0]
 
     def shortest_path(self, start: str, end: str, cutoff: Optional[int] = None) -> List[KGStep]:
-        nodes = self.shortest_path_nodes(start, end, cutoff=cutoff)
+        if start not in self.kg.g or end not in self.kg.g:
+            return []
+
+        nodes: List[str]
+        try:
+            nodes = nx.shortest_path(self.kg.g, start, end)
+            if cutoff is not None and len(nodes) - 1 > int(cutoff):
+                return []
+        except Exception:
+            nodes = self.shortest_path_nodes(start, end, cutoff=cutoff)
+
         if len(nodes) < 2:
             return []
 
         steps: List[KGStep] = []
         for a, b in zip(nodes[:-1], nodes[1:]):
-            if self.kg.g.has_edge(a, b):
-                u, v = a, b
-            elif self.kg.g.has_edge(b, a):
-                u, v = b, a
-            else:
-                u, v = a, b
+            if not self.kg.g.has_edge(a, b):
+                return []
 
-            rel, ed = self._best_edge_between(u, v)
-            steps.append(KGStep(subject=u, relation=rel, object=v, edge=ed))
+            rel, ed = self._best_edge_between(a, b)
+            steps.append(KGStep(subject=a, relation=rel, object=b, edge=ed))
+
         return steps
 
     def _steps_to_lists(self, steps: List[KGStep]) -> PathAsLists:
@@ -136,53 +143,3 @@ class KGPathService:
             subpath_list=subpath_list,
             chain_str=chain,
         )
-
-    def shortest_path_variants(
-        self,
-        start: str,
-        end: str,
-        cutoff: Optional[int] = None,
-        per_hop_top_n: int = 3,
-        max_chains: int = 12,
-    ) -> List[PathAsLists]:
-        nodes = self.shortest_path_nodes(start, end, cutoff=cutoff)
-        if len(nodes) < 2:
-            return []
-
-        hop_candidates: List[List[Tuple[str, Dict[str, Any], str, str]]] = []
-        for a, b in zip(nodes[:-1], nodes[1:]):
-            if self.kg.g.has_edge(a, b):
-                u, v = a, b
-            elif self.kg.g.has_edge(b, a):
-                u, v = b, a
-            else:
-                u, v = a, b
-
-            cands = self._candidate_edges_between(u, v, top_n=per_hop_top_n)
-            hop_candidates.append([(rel, ed, u, v) for (rel, ed) in cands])
-
-        variants: List[List[KGStep]] = [[]]
-        for hop in hop_candidates:
-            new_variants: List[List[KGStep]] = []
-            for partial in variants:
-                for rel, ed, u, v in hop:
-                    steps = partial + [KGStep(subject=u, relation=rel, object=v, edge=ed)]
-                    new_variants.append(steps)
-                    if len(new_variants) >= int(max_chains):
-                        break
-                if len(new_variants) >= int(max_chains):
-                    break
-            variants = new_variants
-            if not variants:
-                break
-
-        out: List[PathAsLists] = []
-        seen = set()
-        for steps in variants:
-            pal = self._steps_to_lists(steps)
-            if pal.chain_str in seen:
-                continue
-            seen.add(pal.chain_str)
-            out.append(pal)
-
-        return out

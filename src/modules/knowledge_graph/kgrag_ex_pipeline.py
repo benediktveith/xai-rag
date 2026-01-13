@@ -1,9 +1,12 @@
 # src/modules/kgragex/kgragex_pipeline.py
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 
 import inspect
+from pydantic import BaseModel, Field
 
 from src.modules.rag.rag_engine import RAGEngine
 from src.modules.llm.llm_client import LLMClient
@@ -17,7 +20,6 @@ from src.modules.knowledge_graph.kg_schema import KGStep
 
 @dataclass
 class RetrievedChunk:
-    # bleibt für Kompatibilität, wird in Notebook Logik nicht genutzt
     chunk_id: str
     score: float
     title: str
@@ -49,22 +51,45 @@ class KGRAGRun:
     llm_calls: int
 
 
+class _MCQAnswer(BaseModel):
+    answer: Literal["A", "B", "C", "D"] = Field(...)
+
+
 class KGRAGExPipeline:
     """
     Notebook konform:
     - LLM extrahiert Entity Paare
     - Für jedes Paar shortest path im KG
     - Pfad zu pseudo paragraph, join über alle Pfade
-    - Antwort nur aus joined paragraph, question, options, kein Retrieval
+    - Antwort nur aus joined paragraph, question, options
     """
 
     def __init__(self, rag: RAGEngine, kg: KGStore, llm_client: LLMClient):
-        self.rag = rag  # nicht genutzt, bleibt kompatibel
+        self.rag = rag
         self.kg = kg
         self.llm_client = llm_client
 
         self.query = KGQueryService(kg, llm_client=llm_client)
         self.path = KGPathService(kg)
+
+    def _create_mcq_prompt(self, paragraph: str, question: str, options: str = "") -> str:
+        full_question = question if not options else f"{question}\n\nOptions:\n{options}"
+        return f"""
+        You are a knowledgeable medical assistant.
+
+        Use the following medical paragraph to answer the multiple-choice question below.
+        Choose the best answer from the provided options based solely on the paragraph.
+
+        Medical Paragraph:
+        {paragraph}
+
+        Question:
+        {full_question}
+
+        Answer:
+        Provide only the letter (A, B, C or D) corresponding to the corrected choice.
+        Do not provide any additional explanation or commentary.
+        """.strip()
 
     def _generate_pseudo_paragraph(self, chain_str: str) -> tuple[str, int]:
         llm = self.llm_client.get_llm()
@@ -75,24 +100,34 @@ class KGRAGExPipeline:
         if not chain:
             return "", 0
 
+        s = chain.replace("__", "")
+        s = (
+            s.replace("->", "")
+            .replace("[", "")
+            .replace("]", "")
+            .replace("(", "")
+            .replace(")", "")
+            .replace("{", "")
+            .replace("}", "")
+            .replace("_", "")
+            .replace(" ", "")
+            .replace("\n", "")
+            .replace("\t", "")
+        )
+        if not any(ch.isalnum() for ch in s):
+            return "", 0
+
         prompt = f"""
-You are a medical instructor helping to generate educational materials.
-
-Given a relationship chain connecting medical concepts, write a short, clear and medically accurate paragraph that explains the connections in a way understandable to students.
-
-Entity->[{{relation}}]->Entity, with possible "__" placeholders for removed nodes or relations.
-
-Rules:
-- Write conservative statements, do not invent facts.
-- If you see "__", treat it as missing information and keep the paragraph appropriately vague.
-- Output exactly one paragraph, no bullets, no citations.
-
-Output:
-A single, coherent paragraph explaining the relationships. Do not include any further comments, only your generated answer.
-
-Chain:
-{chain}
-""".strip()
+            You are a medical instructor helping to generate educational materials.
+                                                                
+            Given a relationship chain connecting medical concepts, write a short, clear and medically accurate paragraph that explains the connections in a way understandable to students.
+                                                                    
+            Input chain:
+            {chain}
+                                                                    
+            Output:
+            A single, coherent paragraph explaining the relationships. Do not include any further comments, only your generated answer.
+            """.strip()
 
         resp = llm.invoke(prompt)
         txt = (getattr(resp, "content", str(resp)) or "").strip()
@@ -103,25 +138,25 @@ Chain:
         if llm is None:
             raise RuntimeError("LLMClient.get_llm() returned None")
 
-        ctx = (paragraph or "").replace("\n", " ").strip()
+        ctx = (paragraph or "").strip()
         if not ctx:
             return "", 0
 
-        extra = """
-Output rules (MANDATORY):
-Respond with the final answer only.
-For multiple choice, respond with only the option letter, for example A or B or C or D.
-No additional text.
-No explanations.
-No punctuation.
-No line breaks.
-""".strip()
+        msg = self._create_mcq_prompt(ctx, question, options=options)
+        print("MSG to LLM :", msg)
+        if hasattr(llm, "with_structured_output"):
+            try:
+                llm_so = llm.with_structured_output(_MCQAnswer)
+                resp = llm_so.invoke(msg)
+                ans = getattr(resp, "answer", None)
+                if isinstance(ans, str) and ans in ("A", "B", "C", "D"):
+                    return ans, 1
+            except Exception:
+                pass
 
-        full_question = question if not options else f"{question}\n\nOptions:\n{options}"
-        msg = self.llm_client._create_final_answer_prompt(full_question, ctx, extra=extra)
         resp = llm.invoke(msg)
-        ans = (getattr(resp, "content", str(resp)) or "").strip()
-        return ans, 1
+        txt = (getattr(resp, "content", str(resp)) or "").strip()
+        return (txt[:1].upper() if txt else ""), 1
 
     def _path_as_chain_str(self, path_lists: PathAsLists) -> str:
         nl = path_lists.node_list or []
@@ -158,6 +193,13 @@ No line breaks.
         for i in range(len(node_list) - 1):
             chain += f"{node_list[i]}->[{edge_list[i]}]->"
         chain += node_list[-1] if node_list else ""
+        
+        print("DEBUG PathAsLists")
+        print("  node_list:", node_list)
+        print("  edge_list:", edge_list)
+        print("  subpath_list:", subpath_list)
+        print("  chain_str:", chain)
+
 
         return PathAsLists(
             node_list=node_list,
@@ -203,101 +245,105 @@ No line breaks.
         return out
 
     def run(
-            self,
-            question_id: str,
-            question: str,
-            gold_answer: Optional[str],
-            options: str = "",
-        ) -> KGRAGRun:
-            q = self.query.extract_entities(question)
-            qents = q.entities
-            pairs = q.pairs
+        self,
+        question_id: str,
+        question: str,
+        gold_answer: Optional[str],
+        options: str = "",
+    ) -> KGRAGRun:
+        q = self.query.extract_entities(question)
+        qents = q.entities
+        pairs = q.pairs
 
-            chains: List[str] = []
-            path_lists_used: List[PathAsLists] = []
-            primary_steps: List[KGStep] = []
+        chains: List[str] = []
+        path_lists_used: List[PathAsLists] = []
+        primary_steps: List[KGStep] = []
 
-            for a_raw, b_raw in pairs:
-                a = self.query.map_to_node(a_raw)
-                b = self.query.map_to_node(b_raw)
-                if not a or not b or a == b:
-                    continue
+        for a_raw, b_raw in pairs:
+            a = self.query.map_to_node(a_raw)
+            b = self.query.map_to_node(b_raw)
+            if not a or not b or a == b:
+                continue
 
-                steps = self.path.shortest_path(a, b)
-                if not steps:
-                    continue
+            steps = self.path.shortest_path(a, b)
+            print("DEBUG shortest_path steps:")
+            for s in steps:
+                print("  subject:", s.subject, "relation:", s.relation, "object:", s.object)
 
-                pl = self._steps_to_path_as_lists(steps)
-                chain = self._path_as_chain_str(pl)
-                if not chain:
-                    continue
+            if not steps:
+                continue
 
-                if not primary_steps:
-                    primary_steps = steps
+            pl = self._steps_to_path_as_lists(steps)
+            chain = self._path_as_chain_str(pl)
+            if not chain:
+                continue
 
-                chains.append(chain)
-                path_lists_used.append(pl)
+            if not primary_steps:
+                primary_steps = steps
 
-            if not chains:
-                mapped: List[str] = []
-                for e in qents:
-                    m = self.query.map_to_node(e)
-                    if m and m not in mapped:
-                        mapped.append(m)
+            chains.append(chain)
+            path_lists_used.append(pl)
 
-                n = len(mapped)
-                for i in range(n):
-                    for j in range(i + 1, n):
-                        a, b = mapped[i], mapped[j]
-                        steps = self.path.shortest_path(a, b)
-                        if not steps:
-                            continue
+        if not chains:
+            mapped: List[str] = []
+            for e in qents:
+                m = self.query.map_to_node(e)
+                if m and m not in mapped:
+                    mapped.append(m)
 
-                        pl = self._steps_to_path_as_lists(steps)
-                        chain = self._path_as_chain_str(pl)
-                        if not chain:
-                            continue
+            n = len(mapped)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    a, b = mapped[i], mapped[j]
+                    steps = self.path.shortest_path(a, b)
+                    if not steps:
+                        continue
 
-                        if not primary_steps:
-                            primary_steps = steps
+                    pl = self._steps_to_path_as_lists(steps)
+                    chain = self._path_as_chain_str(pl)
+                    if not chain:
+                        continue
 
-                        chains.append(chain)
-                        path_lists_used.append(pl)
+                    if not primary_steps:
+                        primary_steps = steps
 
-            llm_calls = 0
-            paragraphs: List[str] = []
-            for ch in chains:
-                p, c = self._generate_pseudo_paragraph(ch)
-                llm_calls += int(c)
-                if p:
-                    paragraphs.append(p)
+                    chains.append(chain)
+                    path_lists_used.append(pl)
 
-            joined_paragraphs = "\n".join(paragraphs).strip()
+        llm_calls = 0
+        paragraphs: List[str] = []
+        for ch in chains:
+            p, c = self._generate_pseudo_paragraph(ch)
+            llm_calls += int(c)
+            if p:
+                paragraphs.append(p)
+        joined_paragraphs = "\n".join(paragraphs).strip()
+        print("Joined Paragrahhs: ", joined_paragraphs)
+        ans = ""
+        if joined_paragraphs:
+            ans, c_ans = self._answer_from_paragraph(joined_paragraphs, question, options=options)
+            llm_calls += int(c_ans)
 
-            ans = ""
-            if joined_paragraphs:
-                ans, c_ans = self._answer_from_paragraph(joined_paragraphs, question, options=options)
-                llm_calls += int(c_ans)
+        start = str(primary_steps[0].subject) if primary_steps else None
+        end = str(primary_steps[-1].object) if primary_steps else None
 
-            start = str(primary_steps[0].subject) if primary_steps else None
-            end = str(primary_steps[-1].object) if primary_steps else None
-            kg_chain = chains[0] if chains else ""
+        primary_chain = chains[0] if chains else ""
 
-            return KGRAGRun(
-                question_id=question_id,
-                question=question,
-                gold_answer=gold_answer,
-                entities=qents,
-                start=start,
-                end=end,
-                path=primary_steps,
-                kg_chain=kg_chain,
-                kg_paragraph=joined_paragraphs,
-                path_lists=path_lists_used,
-                kg_context=joined_paragraphs,
-                retrieved=[],
-                answer=ans,
-                tokens_in=0,
-                tokens_out=0,
-                llm_calls=llm_calls,
-            )
+        return KGRAGRun(
+            question_id=question_id,
+            question=question,
+            gold_answer=gold_answer,
+            entities=qents,
+            start=start,
+            end=end,
+            path=primary_steps,
+            kg_chain=primary_chain,
+            kg_paragraph=joined_paragraphs,
+            path_lists=path_lists_used,
+            kg_context=joined_paragraphs,
+            retrieved=[],
+            answer=ans,
+            tokens_in=0,
+            tokens_out=0,
+            llm_calls=llm_calls,
+        )

@@ -1,5 +1,4 @@
 from typing import Any, Dict, List
-from .rag_engine import RAGEngine
 from ..llm.llm_client import LLMClient
 from ..explainers.cot_explainable import _format_documents
 
@@ -9,7 +8,7 @@ class MultiHopRAGEngine:
     It uses an LLM to generate new queries at each hop to "dig deeper" for the answer.
     """
 
-    def __init__(self, rag_engine: RAGEngine, llm_client: LLMClient, num_hops: int = 2):
+    def __init__(self, rag_engine, llm_client: LLMClient, num_hops: int = 2):
         """
         Initializes the multi-hop engine. 
         

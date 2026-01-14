@@ -8,7 +8,7 @@ class ColbertExplainer:
         self.model.eval()
 
     def explain(self, query, document_text):
-        # Tokenize both
+        # Tokenize query and document_text
         q_enc = self.tokenizer.encode(query, return_tensors="pt")
         d_enc = self.tokenizer.encode(document_text, return_tensors="pt")
 

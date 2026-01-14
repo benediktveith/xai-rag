@@ -16,7 +16,7 @@ class RAGEngine:
         )
         self._vectorstore = None
         self._retriever = None
-        self._default_k = 4 # Default k value
+        self._default_k = 4
 
     def setup(self, documents: Optional[List[Document]] = None, reset: bool = False, k: int = 4):
         """
@@ -69,11 +69,9 @@ class RAGEngine:
         if not self._retriever:
             raise RuntimeError("RagEngine not setup. Call setup() first.")
         
-        # If a specific k is provided for this call, use it
         if k_documents is not None:
             return self._vectorstore.similarity_search(query, k=k_documents)
         
-        # Otherwise, use the default retriever settings
         return self._retriever.invoke(query)
 
     def retrieve_with_scores(self, query: str, k: int = 4) -> List[Dict[str, Any]]:

@@ -9,13 +9,12 @@ import torch
 
 try:
     from langchain_core.documents import Document
-except Exception:  # pragma: no cover - optional dependency in some environments
+except Exception:
     Document = None
 
 from src.modules.explainers.cot_explainable import ExplainableAnswer
 
 NO_SOURCE = "no-source"
-
 
 class CoTEvaluator:
     def __init__(
@@ -32,7 +31,7 @@ class CoTEvaluator:
         self._model: SentenceTransformer | None = None
         self._nli_tokenizer = None
         self._nli_model = None
-        self._device = "cpu"  # Use CPU by default, can be changed to "cuda:0" if GPU available
+        self._device = "cpu"
 
     def _ensure_model(self) -> None:
         if self._model is None:
@@ -195,110 +194,6 @@ class CoTEvaluator:
             "per_evidence_scores": per_evidence_scores
         }
 
-    def feature_importance(
-        self,
-        explanation: Any,
-        documents: Sequence[Any],
-        doc_id_map: Dict[str, str] | None = None,
-    ) -> Dict[str, Any]:
-        """
-        Calculate feature importance for the explanation.
-        Measures how important each piece of evidence is based on:
-        - How well it aligns with source documents (similarity)
-        - How many sources support it
-        - Its contribution to the reasoning chain
-        
-        Args:
-            explanation: The explainable answer object
-            documents: List of source documents
-            doc_id_map: Optional mapping of document IDs to text content
-            
-        Returns:
-            Dictionary with feature importance scores
-        """
-        expl = self._to_model(explanation)
-        doc_map = doc_id_map or self._build_doc_map(documents)
-        doc_ids = list(doc_map.keys())
-        doc_texts = [doc_map[doc_id] for doc_id in doc_ids]
-        doc_index = {doc_id: i for i, doc_id in enumerate(doc_ids)}
-
-        evidence_items = expl.evidence or []
-        reasoning_items = expl.reasoning or []
-
-        if not evidence_items or not doc_texts:
-            return {
-                "evidence_importance": [],
-                "reasoning_depth": 0.0,
-                "support_coverage": 0.0,
-                "top_evidence": []
-            }
-
-        # Calculate similarity scores for evidence
-        spans = [ev.span or "" for ev in evidence_items]
-        span_embs = self._embed(spans)
-        doc_embs = self._embed(doc_texts)
-        similarity_scores = util.cos_sim(span_embs, doc_embs).cpu().tolist()
-
-        # Calculate importance for each evidence item
-        evidence_importance = []
-        for i, ev in enumerate(evidence_items):
-            support_ids = [
-                sid for sid in (ev.support or []) if sid != NO_SOURCE and sid in doc_index
-            ]
-            
-            # Metrics for importance
-            num_sources = len(support_ids)
-            
-            # Max similarity to supporting documents
-            if support_ids:
-                support_idx = [doc_index[sid] for sid in support_ids]
-                max_similarity = max(similarity_scores[i][j] for j in support_idx)
-            else:
-                max_similarity = 0.0
-            
-            # Combined importance score
-            importance = (max_similarity + (num_sources / len(doc_ids))) / 2
-            
-            evidence_importance.append({
-                "index": i,
-                "span": ev.span or "",
-                "importance": float(importance),
-                "similarity": float(max_similarity),
-                "num_sources": num_sources,
-                "support_ids": support_ids
-            })
-
-        # Sort by importance
-        evidence_importance.sort(key=lambda x: x["importance"], reverse=True)
-        
-        # Calculate reasoning depth (average support per reasoning step)
-        reasoning_support_counts = []
-        for step in reasoning_items:
-            support_ids = [
-                sid for sid in (step.support or []) if sid != NO_SOURCE and sid in doc_index
-            ]
-            reasoning_support_counts.append(len(support_ids))
-        
-        reasoning_depth = (sum(reasoning_support_counts) / len(reasoning_support_counts)) if reasoning_support_counts else 0.0
-        
-        # Calculate support coverage (how many documents are used)
-        all_support_ids = set()
-        for ev in evidence_items:
-            support_ids = [sid for sid in (ev.support or []) if sid != NO_SOURCE and sid in doc_index]
-            all_support_ids.update(support_ids)
-        
-        support_coverage = len(all_support_ids) / len(doc_ids) if doc_ids else 0.0
-
-        return {
-            "evidence_importance": evidence_importance,
-            "reasoning_depth": float(reasoning_depth),
-            "support_coverage": float(support_coverage),
-            "top_evidence": [
-                {"span": item["span"], "importance": item["importance"]} 
-                for item in evidence_importance[:3]
-            ]
-        }
-
     def interpretability(
         self,
         explanation: Any,
@@ -358,62 +253,6 @@ class CoTEvaluator:
             "ground_truth_evidence": ground_truth_evidence,
             "intersection_size": len(system_tokens & truth_tokens) if system_tokens and truth_tokens else 0,
             "union_size": len(system_tokens | truth_tokens) if system_tokens and truth_tokens else 0
-        }
-
-    def answer_score(
-        self,
-        predicted_answer: str,
-        ground_truth: str,
-        metric: str = "f1",
-    ) -> Dict[str, Any]:
-        """
-        Calculate score for the answer (F1-Score or Accuracy).
-        
-        Args:
-            predicted_answer: The predicted answer from the model
-            ground_truth: The actual correct answer
-            metric: Type of metric to calculate ("f1", "accuracy", or "both")
-            
-        Returns:
-            Dictionary with answer evaluation scores
-        """
-        predicted = self._normalize(predicted_answer)
-        truth = self._normalize(ground_truth)
-        
-        # Exact match accuracy
-        exact_match = 1.0 if predicted == truth else 0.0
-        
-        # Token-level scores using Jaccard coefficient
-        pred_tokens = set(self._tokenize(predicted))
-        truth_tokens = set(self._tokenize(truth))
-        
-        if not pred_tokens and not truth_tokens:
-            # Both empty
-            jaccard_score = 1.0
-        elif not pred_tokens or not truth_tokens:
-            # One empty, one not
-            jaccard_score = 0.0
-        else:
-            # Calculate Jaccard coefficient: |A ∩ B| / |A ∪ B|
-            intersection = len(pred_tokens & truth_tokens)
-            union = len(pred_tokens | truth_tokens)
-            jaccard_score = intersection / union if union > 0 else 0.0
-        
-        # Determine which score to return based on metric parameter
-        if metric == "jaccard":
-            primary_score = jaccard_score
-        elif metric == "accuracy":
-            primary_score = exact_match
-        else:  # "both" or default to jaccard
-            primary_score = jaccard_score
-        
-        return {
-            "metric": metric,
-            "score": float(primary_score),
-            "jaccard_score": float(jaccard_score),
-            "exact_match": float(exact_match),
-            "predicted": predicted_answer,
-            "ground_truth": ground_truth
         }
 
     def evaluate(
@@ -495,28 +334,6 @@ class CoTEvaluator:
                     lines.append(f"        \"{span}\"")
             lines.append("")
         
-        # Feature Importance
-        if "feature_importance" in metrics:
-            lines.append("🔍 Feature Importance:")
-            fi = metrics["feature_importance"]
-            
-            # Show overall metrics
-            if "reasoning_depth" in fi:
-                lines.append(f"  • Reasoning Depth: {fi['reasoning_depth']:.4f}")
-            if "support_coverage" in fi:
-                lines.append(f"  • Support Coverage: {fi['support_coverage']:.4f}")
-            
-            # Show top evidence
-            if fi.get("top_evidence"):
-                lines.append("  • Top Evidence:")
-                for i, item in enumerate(fi["top_evidence"], 1):
-                    span = item.get("span", "")
-                    importance = item.get("importance", 0.0)
-                    # Truncate long spans
-                    display_span = span[:60] + "..." if len(span) > 60 else span
-                    lines.append(f"    {i}. [{importance:.4f}] {display_span}")
-            lines.append("")
-        
         # Interpretability
         if "interpretability" in metrics:
             lines.append("🎯 Interpretability (Evidence Overlap):")
@@ -531,24 +348,7 @@ class CoTEvaluator:
             else:
                 lines.append(f"  • {interp.get('explanation', 'N/A')}")
             lines.append("")
-        
-        # Answer Score
-        if "answer_score" in metrics:
-            lines.append("✅ Answer Score:")
-            ans = metrics["answer_score"]
-            lines.append(f"  • Metric: {ans.get('metric', 'N/A').upper()}")
-            score = ans.get('score', 0.0)
-            if isinstance(score, float):
-                lines.append(f"  • Score: {score:.4f}")
-            else:
-                lines.append(f"  • Score: {score}")
-            
-            # Show detailed scores if available
-            if 'jaccard_score' in ans:
-                lines.append(f"  • Jaccard Score: {ans['jaccard_score']:.4f}")
-            if 'exact_match' in ans:
-                lines.append(f"  • Exact Match: {'✓' if ans['exact_match'] == 1.0 else '✗'} ({ans['exact_match']:.4f})")
-            lines.append("")
+    
         
         lines.append("=" * 60)
         return "\n".join(lines)

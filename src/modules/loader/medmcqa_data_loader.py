@@ -2,7 +2,6 @@ import json
 import random
 import zipfile
 import gdown
-import urllib.request
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -78,7 +77,6 @@ class MedMCQADataLoader:
         return data
 
     def _find_split_file(self, split: str) -> Path:
-    
         candidates = [
             self.RAW_DIR / f"{split}.json",
             self.RAW_DIR / f"{split}.jsonl",
@@ -132,7 +130,6 @@ class MedMCQADataLoader:
             print("Download and extraction complete.")
 
         except Exception as e:
-            # Clean up partial downloads if necessary
             raise RuntimeError(f"Failed to download/extract data: {e}")
         finally:
             # Remove the zip file after extraction to save space
@@ -143,7 +140,6 @@ class MedMCQADataLoader:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        # Erst als JSONL versuchen, weil dein Fehlerbild exakt danach aussieht
         out: List[Dict[str, Any]] = []
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -152,14 +148,12 @@ class MedMCQADataLoader:
                     if not line:
                         continue
                     out.append(json.loads(line))
-            # Wenn wir mindestens 1 Objekt parsed haben und nicht alles leer war, ist es JSONL
             if out:
                 self._cache[cache_key] = out
                 return out
         except Exception:
             out = []
 
-        # Fallback: klassisches JSON (Liste oder Objekt)
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
@@ -259,8 +253,8 @@ class MedMCQADataLoader:
                 metadata={
                     "question_id": item.get("id", idx),
                     "question": question,
-                    "answer": gold,         # A/B/C/D
-                    "cop_raw": cop,         # original
+                    "answer": gold,
+                    "cop_raw": cop,
                     "split": split,
                     "source": "medmcqa",
                     "subject_name": item.get("subject_name", None),

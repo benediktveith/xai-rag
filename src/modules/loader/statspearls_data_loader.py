@@ -13,7 +13,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 try:
-    from lxml import etree  # type: ignore
+    from lxml import etree
 except Exception:
     etree = None
 

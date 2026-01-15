@@ -149,6 +149,7 @@ class CoTExplainable(ExplainableModule):
             - Reasoning support should only include doc ids already used in evidence (or [no-source]).
             - For support_type direct/bridge, quote is required; if no quote exists, use [no-source].
             - Do NOT invent new ids; only use the allowed list.
+            - Your evidence can never be based on the answer only the context.
 
             EXAMPLES:
 

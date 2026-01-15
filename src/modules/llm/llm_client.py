@@ -6,7 +6,6 @@ from langchain_core.runnables import Runnable
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 
-
 class LLMClient:
     def __init__(
         self,
@@ -110,3 +109,27 @@ class LLMClient:
 
             Final Answer:
             """
+            
+    def _extract_token_usage(self, resp) -> tuple[int, int]:
+        raw = None
+
+        if isinstance(resp, dict) and "raw" in resp:
+            raw = resp.get("raw")
+        else:
+            raw = resp
+
+        in_tok = 0
+        out_tok = 0
+
+        usage = getattr(raw, "usage_metadata", None)
+        if isinstance(usage, dict):
+            in_tok = int(usage.get("input_tokens") or 0)
+            out_tok = int(usage.get("output_tokens") or 0)
+            return in_tok, out_tok
+
+        meta = getattr(raw, "response_metadata", None)
+        if isinstance(meta, dict):
+            in_tok = int(meta.get("prompt_eval_count") or 0)
+            out_tok = int(meta.get("eval_count") or 0)
+
+        return in_tok, out_tok

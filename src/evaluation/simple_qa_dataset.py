@@ -1,10 +1,3 @@
-"""
-Simple German QA Dataset (N=10)
-================================
-A small dataset with simple question-answer pairs and short contexts
-for testing and evaluation purposes.
-"""
-
 import re
 from typing import List
 
@@ -65,7 +58,7 @@ SIMPLE_QA_DATASET = [
     },
     {
         "question": "Wohin reist Maria in den Urlaub?",
-        "context": "Maria plant ihre Sommerreise sehr sorgfältig. Letztes Jahr war sie in Italien und hat Rom besichtigt. Ihre beste Freundin Laura fährt nach Frankreich an die Côte d'Azur. Maria hatte ursprünglich vor, nach Griechenland zu fliegen, aber die Flüge waren zu teuer. Dann überlegte sie, nach Portugal zu fahren. Letzte Woche hat sie sich aber endgültig entschieden und Flüge nach Barcelona gebucht. Sie freut sich sehr auf die spanische Küche und die Architektur von Gaudí. Ihr Bruder empfiehlt ihr, auch Madrid zu besuchen, aber dafür hat sie nur eine Woche Zeit.",
+        "context": "Maria plant ihre Sommerreise sehr sorgfältig. Letztes Jahr war sie in Italien und hat Rom besichtigt. Ihre beste Freundin Laura fährt nach Frankreich an die Küste. Maria hatte ursprünglich vor, nach Griechenland zu fliegen, aber die Flüge waren zu teuer. Dann überlegte sie, nach Portugal zu fahren. Letzte Woche hat sie sich aber endgültig entschieden und Flüge nach Barcelona gebucht.",
         "answer": "Barcelona",
         "evidence": "Letzte Woche hat sie sich aber endgültig entschieden und Flüge nach Barcelona gebucht."
     },
@@ -83,10 +76,8 @@ def _split_into_sentences(text: str) -> List[str]:
     Splits text into sentences based on sentence boundaries (., !, ?).
     Returns a list of sentences with leading/trailing whitespace stripped.
     """
-    # Split on sentence boundaries while keeping the delimiter
     sentences = re.split(r'([.!?])', text)
     
-    # Reconstruct sentences by pairing content with delimiter
     result = []
     for i in range(0, len(sentences) - 1, 2):
         sentence = sentences[i].strip()

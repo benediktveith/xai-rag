@@ -3,7 +3,7 @@ import requests
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from langchain_core.documents import Document
-from tqdm import tqdm  # Recommended for progress bars
+from tqdm import tqdm
 
 class DataLoader:
 
@@ -32,29 +32,24 @@ class DataLoader:
             as_documents: If True, returns List[Document]. If False, returns raw List[Dict].
             limit: If set, only processes the first N items (good for testing).
         """
-        # 1. Ensure directory structure
         self.RAW_DIR.mkdir(parents=True, exist_ok=True)
         
-        # 2. Download if missing
         if not self.DATASET_FILE.exists():
             self._download_hotpotqa()
         else:
             print(f"✓ Dataset found at {self.DATASET_FILE}")
 
-        # 3. Load Raw Data
         raw_data = self._load_hotpotqa_data()
         
         if limit:
             raw_data = raw_data[:limit]
             print(f"Limiting data to first {limit} entries.")
 
-        # 4. Return requested format
         if as_documents:
             return self.create_documents(raw_data)
         return raw_data
 
     def _download_hotpotqa(self):
-        """Internal download logic"""
         print(f"Downloading HotPotQA from {self.HOTPOTQA_URL}...")
         try:
             response = requests.get(self.HOTPOTQA_URL, stream=True)
@@ -69,7 +64,7 @@ class DataLoader:
                     if chunk:
                         f.write(chunk)
                         pbar.update(len(chunk))
-            print(f"\n✓ Download complete.")
+            print(f"\n Download complete.")
             
         except Exception as e:
             if self.DATASET_FILE.exists():
@@ -85,7 +80,7 @@ class DataLoader:
         try:
             with open(self.DATASET_FILE, 'r', encoding='utf-8') as f:
                 self._data = json.load(f)
-            print(f"✓ Loaded {len(self._data)} questions.")
+            print(f"Loaded {len(self._data)} questions.")
             return self._data
         except json.JSONDecodeError:
             print("Error: The dataset file seems corrupted.")
@@ -109,15 +104,13 @@ class DataLoader:
             context = item.get("context", [])
             supporting_facts = item.get("supporting_facts", [])
             
-            # Map: Title -> Set of Sentence Indices that are supporting facts
-            # e.g. {"Eiffel Tower": {0, 2}}
             supporting_map = {}
             for title, sent_id in supporting_facts:
                 if title not in supporting_map:
                     supporting_map[title] = set()
                 supporting_map[title].add(sent_id)
             
-            # Process each context article
+            # Process each context articl
             for title, sentences in context:
                 # Join sentences to create the full chunk text
                 content = " ".join(sentences)
@@ -142,5 +135,5 @@ class DataLoader:
                 )
                 documents.append(doc)
         
-        print(f"✓ Created {len(documents)} context chunks.")
+        print(f"Created {len(documents)} context chunks.")
         return documents

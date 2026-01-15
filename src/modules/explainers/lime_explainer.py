@@ -18,7 +18,7 @@ class LimeExplainer:
         self.rag_engine = rag_engine
         self.embedding_model = rag_engine.embedding_model
 
-    def explain(self, trace: Dict[str, Any], explained_doc_key: _DOC_TYPES = "highest_ranked_document", doc_rank_index: int = None) -> Dict[str, Any]:
+    def explain(self, trace: Dict[str, Any], explained_doc_key: _DOC_TYPES = "highest_ranked_document") -> Dict[str, Any]:
         explanations = {}
         
         explainer = LimeTextExplainer(class_names=["irrelevant", "relevant"])
@@ -26,54 +26,60 @@ class LimeExplainer:
         for hop in trace["hops"]:
             hop_number = hop["hop_number"]
             query = hop["query_for_this_hop"]
-
-            if doc_rank_index is None:
-                document = hop.get(explained_doc_key)
-            else:
-                # get the document ranked as doc_rank_index position
-                document = hop.get(explained_doc_key)[doc_rank_index]
+            documents = hop.get(explained_doc_key)
             
-            if not document:
+            if not documents:
                 continue
-                
+
             print(f"--- LIME Explaining Hop {hop_number} ---")
-            
-            doc_text = document.page_content
-            
-            # Setup the prediction function wrapper
-            prediction_fn = self._create_similarity_prediction_fn(query)
-            
-            # Get true score for display (extracting the 'relevant' score)
-            true_probs = prediction_fn([doc_text])
-            true_score = true_probs[0, 1] 
 
-            # Run LIME
-            # labels=(1,) tells LIME we only care about explaining Class 1 ("relevant")
-            explanation = explainer.explain_instance(
-                doc_text,
-                prediction_fn,
-                labels=(1,), 
-                num_features=10000, 
-                num_samples=500 
-            )
+            explanations_hop = []
 
-            # Extract data for Class 1
-            # LIME returns a map of {label: list_of_tuples}
-            explanation_tuples = explanation.as_list(label=1)
-            
-            # Get the intercept (baseline probability) for Class 1
-            # explanation.intercept is a dict {label: value}
-            lime_intercept = explanation.intercept[1]
-            lime_prediction = explanation.local_pred[0] # Usually a float for the specific label
+            for i, doc in enumerate(documents):
+                print(f"- Explaining Doc {i+1}/{len(documents)} -")
 
-            explanations[f"hop_{hop_number}"] = {
-                "explanation_tuples": explanation_tuples,
-                "document_text": doc_text,
-                "query": query,
-                "true_score": true_score,
-                "lime_intercept": lime_intercept,
-                "lime_prediction": lime_prediction
-            }
+                if not isinstance(documents, list):
+                    documents = [documents]
+                    
+                
+                doc_text = doc.page_content
+                
+                # Setup the prediction function wrapper
+                prediction_fn = self._create_similarity_prediction_fn(query)
+                
+                # Get true score for display (extracting the 'relevant' score)
+                true_probs = prediction_fn([doc_text])
+                true_score = true_probs[0, 1] 
+
+                # Run LIME
+                # labels=(1,) tells LIME we only care about explaining Class 1 ("relevant")
+                explanation = explainer.explain_instance(
+                    doc_text,
+                    prediction_fn,
+                    labels=(1,), 
+                    num_features=10000, 
+                    num_samples=500 
+                )
+
+                # Extract data for Class 1
+                # LIME returns a map of {label: list_of_tuples}
+                explanation_tuples = explanation.as_list(label=1)
+                
+                # Get the intercept (baseline probability) for Class 1
+                # explanation.intercept is a dict {label: value}
+                lime_intercept = explanation.intercept[1]
+                lime_prediction = explanation.local_pred[0] # Usually a float for the specific label
+
+                explanations_hop.append({
+                    "explanation_tuples": explanation_tuples,
+                    "document_text": doc_text,
+                    "query": query,
+                    "true_score": true_score,
+                    "lime_intercept": lime_intercept,
+                    "lime_prediction": lime_prediction
+                })
+
+            explanations[f"hop_{hop_number}"] = explanations_hop
 
         return explanations
 

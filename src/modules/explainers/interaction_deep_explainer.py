@@ -1,0 +1,89 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import shap
+
+class InteractionDeepExplainer:
+    def __init__(self, rag_engine):
+        self.rag_engine = rag_engine
+        self.model = rag_engine.model
+        self.embedding_layer = rag_engine.embedding
+        self.device = rag_engine.device
+        self.vocab = rag_engine.vocab 
+
+    def explain(self, query, document):
+        # 1. Use the Engine's tokenizer to ensure exact match with model inputs
+        # This handles padding/truncation exactly as the model expects
+        # We assume rag_engine.text_to_ids returns [1, Seq_Len]
+        q_ids = self.model.text_to_ids(query) if hasattr(self.model, 'text_to_ids') else self.rag_engine.text_to_ids(query)
+        d_ids = self.model.text_to_ids(document) if hasattr(self.model, 'text_to_ids') else self.rag_engine.text_to_ids(document)
+        
+        # If text_to_ids is on the engine, not the model (based on previous code):
+        if hasattr(self, 'model') and not hasattr(self.model, 'text_to_ids'):
+             # Fallback if you didn't pass rag_engine to __init__ correctly
+             # But assuming you passed 'rag_engine' to __init__ and stored 'self.rag_engine = rag_engine'
+             q_ids = self.rag_engine.text_to_ids(query)
+             d_ids = self.rag_engine.text_to_ids(document)
+
+        # 2. Get Input Embeddings
+        d_embeddings = self.embedding_layer(d_ids).detach() 
+
+        # 3. Create Proxy (Same as before)
+        class Proxy(nn.Module):
+            def __init__(self, original_model, fixed_q_ids):
+                super().__init__()
+                self.model = original_model
+                self.q_ids = fixed_q_ids
+                
+            def forward(self, doc_embs):
+                current_batch_size = doc_embs.shape[0]
+                q_emb = self.model.embedding(self.q_ids)
+                q_emb_expanded = q_emb.expand(current_batch_size, -1, -1)
+                
+                model_type = str(type(self.model))
+                if "MatchPyramidWrapper" in model_type:
+                    interaction = torch.bmm(q_emb_expanded, doc_embs.transpose(1, 2))
+                    x = interaction.unsqueeze(1)
+                    x = self.model.pool(self.model.relu(self.model.conv1(x)))
+                    return self.model.linear(x.view(x.size(0), -1))
+                elif "KNRMWrapper" in model_type:
+                    interaction = torch.bmm(q_emb_expanded, doc_embs.transpose(1, 2))
+                    features = self.model.kernel_pooling(interaction)
+                    doc_features = torch.sum(features, dim=1)
+                    return self.model.dense(doc_features)
+                return None
+
+        # 4. Run DeepExplainer
+        proxy = Proxy(self.model, q_ids)
+        background = torch.zeros_like(d_embeddings)
+        explainer = shap.DeepExplainer(proxy, background)
+        shap_values_list = explainer.shap_values(d_embeddings, check_additivity=False)
+        
+        # 5. Get Scores (Shape: [Seq_Len])
+        # Summing over embedding dim (300)
+        raw_scores = np.sum(shap_values_list[0], axis=2)[0]
+        
+        # 6. Align Words with Scores
+        # We need to decode the IDs back to words to guarantee 1-to-1 mapping
+        # Create a reverse vocab: ID -> Word
+        id_to_word = {v: k for k, v in self.vocab.items()}
+        
+        # Convert tensor IDs to list
+        d_id_list = d_ids[0].cpu().numpy()
+        
+        aligned_words = []
+        for token_id in d_id_list:
+            word = id_to_word.get(token_id, "[UNK]")
+            aligned_words.append(word)
+            
+        # 7. Filter out Padding for cleaner plots
+        # We only keep tokens that are NOT padding (ID 0)
+        final_scores = []
+        final_words = []
+        
+        for word, score, token_id in zip(aligned_words, raw_scores, d_id_list):
+            if token_id != 0: # Assuming 0 is PAD
+                final_words.append(word)
+                final_scores.append(score)
+                
+        return np.array(final_scores), final_words

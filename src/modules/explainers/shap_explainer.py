@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 from langchain_core.documents import Document
 from IPython.display import display, HTML
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -12,7 +12,7 @@ class ShapExplainer:
     """
     Explains retrieval rankings using SHAP.
     Supports two background strategies:
-    1. 'Zero': Replaces tokens with nothing (True Deletion).
+    1. 'Zero': Replaces tokens with nothing (Deletion).
     2. 'Low-IDF': Replaces tokens with common 'background' words from the corpus.
     """
 
@@ -49,7 +49,7 @@ class ShapExplainer:
         self, 
         trace: Dict[str, Any], 
         explained_doc_key: _DOC_TYPES = "highest_ranked_document",
-        background: _BACKGROUND_TYPES = "Low-IDF"
+        background: _BACKGROUND_TYPES = "Zero"
     ) -> Dict[str, Any]:
         
         if background == "Low-IDF" and not self.low_idf_ids:
@@ -60,57 +60,140 @@ class ShapExplainer:
         for hop in trace["hops"]:
             hop_number = hop["hop_number"]
             query = hop["query_for_this_hop"]
+            documents = hop.get(explained_doc_key)
+            
+            if not documents:
+                continue
+
+            if not isinstance(documents, list):
+                documents = [documents]
+                
+            print(f"--- Shap Explaining Hop {hop_number} (Background: {background}) ---")
+
+            explanations_hop = []
+
+            for i,doc in enumerate(documents):
+                print(f"- Explaining Doc {i+1}/{len(documents)} -")
+
+                if isinstance(doc, tuple):
+                    doc = doc[0]
+
+                doc_text = doc.page_content
+                
+                # Tokenize to IDs for safe reconstruction
+                encoded = self.tokenizer(doc_text, add_special_tokens=False)
+                token_ids = np.array(encoded['input_ids'])
+                display_tokens = self.tokenizer.convert_ids_to_tokens(token_ids)
+                num_tokens = len(token_ids)
+                
+                query_embedding = self._embed_text([query])
+
+                # Create Prediction Function based on selected background strategy
+                prediction_fn = self._create_similarity_prediction_fn(
+                    query_embedding=query_embedding, 
+                    original_token_ids=token_ids,
+                    mode=background
+                )
+
+                # SHAP Setup
+                # Background is always zeros (representing "masked state")
+                # The prediction_fn interprets what "masked" means (delete vs replace)
+                # Hence, the background is not always "0" in the model interpretation,
+                # it depends on the background type selected (Zero or Low_IDF)!
+                background_data = np.zeros((1, num_tokens))
+                explainer = shap.KernelExplainer(prediction_fn, background_data)
+
+                instance_to_explain = np.ones((1, num_tokens))
+                
+                nsamples = "auto"
+
+                shap_values = explainer.shap_values(instance_to_explain, nsamples=nsamples, silent=True)[0]
+                
+                # Mean centering for interpretation
+                mean_shap = np.mean(shap_values)
+                centered_shap_values = shap_values - mean_shap
+
+                explanations_hop.append ({
+                    "shap_values": shap_values,
+                    "centered_shap_values": centered_shap_values,
+                    "tokens": display_tokens,
+                    "base_text": doc_text,
+                    "query": query,
+                    "score": prediction_fn(instance_to_explain)[0],
+                    "background_mode": background
+                })
+
+            explanations[f"hop_{hop_number}"] = explanations_hop
+
+        # Dict(List(Dict))
+        return explanations
+    
+    def explain_v2(
+        self, 
+        trace: Dict[str, Any], 
+        explained_doc_key: _DOC_TYPES = "highest_ranked_document"
+    ) -> Dict[str, Any]:
+        """
+        Uses standard shap.Explainer (PartitionExplainer).
+        Note: This forces the 'Zero' (Deletion) background strategy.
+        """
+        explanations = {}
+
+        for hop in trace["hops"]:
+            hop_number = hop["hop_number"]
+            query = hop["query_for_this_hop"]
             document = hop.get(explained_doc_key)
             
             if not document:
                 continue
                 
-            print(f"--- Shap Explaining Hop {hop_number} (Background: {background}) ---")
+            print(f"--- Explaining Hop {hop_number} (Standard Explainer) ---")
             
             doc_text = document.page_content
-            
-            # Tokenize to IDs for safe reconstruction
-            encoded = self.tokenizer(doc_text, add_special_tokens=False)
-            token_ids = np.array(encoded['input_ids'])
-            display_tokens = self.tokenizer.convert_ids_to_tokens(token_ids)
-            num_tokens = len(token_ids)
-            
             query_embedding = self._embed_text([query])
 
-            # Create Prediction Function based on selected background strategy
-            prediction_fn = self._create_similarity_prediction_fn(
-                query_embedding=query_embedding, 
-                original_token_ids=token_ids,
-                mode=background
-            )
+            # 1. Define Predict Function
+            # Returns 1D array of scores: [0.8, 0.5, 0.9]
+            def predict(texts: List[str]) -> np.ndarray:
+                valid_indices = [i for i, t in enumerate(texts) if t.strip()]
+                valid_texts = [texts[i] for i in valid_indices]
+                
+                scores = np.zeros(len(texts))
+                
+                if valid_texts:
+                    doc_embeddings = self._embed_text(valid_texts)
+                    sims = torch.mm(doc_embeddings, query_embedding.transpose(0, 1))
+                    np.put(scores, valid_indices, sims.flatten().numpy())
+                
+                return scores
 
-            # SHAP Setup
-            # Background is always zeros (representing "masked state")
-            # The prediction_fn interprets what "masked" means (delete vs replace)
-            background_data = np.zeros((1, num_tokens))
-            explainer = shap.KernelExplainer(prediction_fn, background_data)
+            # 2. Create Masker
+            masker = shap.maskers.Text(self.tokenizer)
 
-            instance_to_explain = np.ones((1, num_tokens))
-            
-            nsamples = "auto"
+            # 3. Create Explainer
+            explainer = shap.Explainer(predict, masker)
 
-            shap_values = explainer.shap_values(instance_to_explain, nsamples=nsamples, silent=True)[0]
-            
-            # Mean centering for interpretation
-            mean_shap = np.mean(shap_values)
-            centered_shap_values = shap_values - mean_shap
+            # 4. Run Explanation
+            shap_values = explainer([doc_text])
+
+            # 5. Extract results
+            # shap_values is an Explanation object. 
+            # .values gives the numbers.
+            values = shap_values.values[0] 
 
             explanations[f"hop_{hop_number}"] = {
-                "shap_values": shap_values,
-                "centered_shap_values": centered_shap_values,
-                "tokens": display_tokens,
+                "shap_values": values,
+                # .data holds the tokens
+                "tokens": shap_values.data[0], 
                 "base_text": doc_text,
                 "query": query,
-                "score": prediction_fn(instance_to_explain)[0],
-                "background_mode": background
+                "score": np.sum(shap_values),   # since all shap values sum up to the outcome
+                # .base_values is the starting score (expected value)
+                "base_value": shap_values.base_values[0] 
             }
 
         return explanations
+    
 
     def _get_low_idf_tokens(self, documents: List[Document], top_k: int) -> List[int]:
         """Calculates top_k tokens with lowest IDF (most common)."""
@@ -119,10 +202,10 @@ class ShapExplainer:
             return []
             
         try:
-            # 1. Compute IDF
+            # 1. Compute IDF including stop words (to avoid shift in meaning)
             document_text = [doc.page_content for doc in documents] # convert Document object to string
 
-            vectorizer = TfidfVectorizer(use_idf=True, smooth_idf=True, stop_words='english')
+            vectorizer = TfidfVectorizer(use_idf=True, smooth_idf=True)
             vectorizer.fit_transform(document_text)
             
             feature_names = vectorizer.get_feature_names_out()
@@ -177,6 +260,7 @@ class ShapExplainer:
 
             for mask in mask_batch:
                 # Identify which tokens are KEPT (1) and which are MASKED (0)
+                # We then apply the selected Background image type
                 kept_indices = np.where(mask == 1.0)[0]
                 masked_indices = np.where(mask == 0.0)[0]
 
@@ -225,33 +309,27 @@ class ShapExplainer:
 
         return prediction_fn
 
-    def plot_bar(self, explanations: List, hop_key: str):
+    def plot_bar(self, explanations: Dict[str, Any]):
         """Helper to plot the shap bar plot."""
-        import shap.plots
-        data = explanations[hop_key]
-        if not data:
-            return "No data found."
-            
-        print(f"Query: {data['query']}")
-        print(f"Score: {data['score']:.4f}")
+
+        print(f"Score: {explanations['score']:.4f}")
         
         # Use SHAP's built-in text plotter
         return shap.plots.bar(shap.Explanation(
-            values=data["shap_values"],
+            values=explanations["shap_values"],
             base_values=0, # approx baseline
-            data=data["tokens"]
+            data=explanations["tokens"]
         ))
 
-    def plot_text_heatmap(self, explanations: List, hop_key: str):
+    def plot_text_heatmap(self, explanations: Dict[str, Any]):
         """
         Renders the document text as HTML, highlighting tokens based on SHAP Values.
         Red = Positive (Increases similarity)
         Blue = Negative (Dilutes/decreases similarity)
         """
-        data = explanations[hop_key]
 
-        tokens = data["tokens"]
-        weights = data["shap_values"]
+        tokens = explanations["tokens"]
+        weights = explanations["shap_values"]
 
         max_weight = max(abs(val) for val in weights)
         if max_weight == 0:
@@ -277,7 +355,7 @@ class ShapExplainer:
         html_parts = []
         
         html_parts.append(f"<div style='border:1px solid #ddd; padding:15px; font-family:sans-serif; line-height:1.6;'>")
-        html_parts.append(f"<h4>Similarity Heatmap (Query: <i>{data['query']}</i>)</h4>")
+        html_parts.append(f"<h4>Similarity Heatmap (Query: <i>{explanations['query']}</i>)</h4>")
         html_parts.append(f"<p style='font-size:14px; color:gray'><b>HINT</b>: Some words are split by the Tokenizer. Every part of the split word, starting with the second, have a leading <b>\"##\"</b> (plexus = pl ##ex ##us).</p>")
         html_parts.append(f"<p style='font-size:12px; color:gray'><b>Red</b> = Increases Similarity | <b>Blue</b> = Decreases Similarity</p>")
         

@@ -1,0 +1,207 @@
+[
+  {
+    "question_id": "3f63787d-7816-48fe-a623-b61ba10a3001",
+    "primary_path_chunk_ids": [
+      "64a83648d97151be6fa7f53829173e99a503ca74293524bd5dc91579f8997532",
+      "e9d6f811c7e996e661d962c7d0806efeae97ece0a0a7aa4bdba7e1afcdedb5f0",
+      "fcef88bbed5339e12f7bb51d7bc9556fd69424c2007ee3f3e768e3577de31e05"
+    ],
+    "node_chunk_ids": [
+      "64a83648d97151be6fa7f53829173e99a503ca74293524bd5dc91579f8997532"
+    ],
+    "edge_chunk_ids": [
+      "64a83648d97151be6fa7f53829173e99a503ca74293524bd5dc91579f8997532"
+    ],
+    "subpath_chunk_ids": [
+      "64a83648d97151be6fa7f53829173e99a503ca74293524bd5dc91579f8997532"
+    ],
+    "most_influential_node": "Fracture",
+    "most_influential_edge": "Fracture::CONTRAINDICATED_FOR::Osteopathic Manipulative Treatment",
+    "most_influential_subpath": "(Fracture, CONTRAINDICATED_FOR, Osteopathic Manipulative Treatment)"
+  },
+  {
+    "question_id": "80a922e3-e55d-4cdc-8a90-3100c3647e99",
+    "primary_path_chunk_ids": [
+      "aa5f566db49c1607a9a220d2a73105a9e052c205266856bf022bed7edc16fb39",
+      "d14898a0674de0106b1e972c6a35b3d8d90f5c9771d105139a29a68419295aba"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": null
+  },
+  {
+    "question_id": "fc913366-8a30-442c-9769-0e4aa0ad5829",
+    "primary_path_chunk_ids": [
+      "850b92133d189fadcef39dc4bbf360ddb22d3f9b6c30b3448a1396cc984ace49"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": null
+  },
+  {
+    "question_id": "52fd537b-dc7f-4cf1-9a3a-6757ebd9ea31",
+    "primary_path_chunk_ids": [
+      "850b92133d189fadcef39dc4bbf360ddb22d3f9b6c30b3448a1396cc984ace49"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": null
+  },
+  {
+    "question_id": "d710d2f4-0d24-46b4-b50d-9633fe43b73f",
+    "primary_path_chunk_ids": [
+      "b083de3b0572c7aa8616071e444f60e405658814c4dfc04c481eb14b0e3f5363"
+    ],
+    "node_chunk_ids": [
+      "b083de3b0572c7aa8616071e444f60e405658814c4dfc04c481eb14b0e3f5363"
+    ],
+    "edge_chunk_ids": [
+      "b083de3b0572c7aa8616071e444f60e405658814c4dfc04c481eb14b0e3f5363"
+    ],
+    "subpath_chunk_ids": [
+      "b083de3b0572c7aa8616071e444f60e405658814c4dfc04c481eb14b0e3f5363"
+    ],
+    "most_influential_node": "diplopia",
+    "most_influential_edge": "RVAS::CAUSES::Ataxia",
+    "most_influential_subpath": "(diplopia, ASSOCIATED_WITH, RVAS)"
+  },
+  {
+    "question_id": "dea5db70-e900-4d6e-8851-e3e81b9df816",
+    "primary_path_chunk_ids": [
+      "d04bff795cc9954ba08ed6a552183e95ccc3190a9ae29e511ba28fdb935bd3c1",
+      "e59aa248654ed8f7b4fc931c4606e2855ee30fec6f4ccfc21f171a9cbe3b197e",
+      "89533f4bf9ac2d29ede95643a828f295a89ff7c6655ae648b36fc466cd7e1c24",
+      "e7ee85ef1a39e293072f896b6b96b6b5f6c1efdb8decf8ec8cae809508f0ccba",
+      "73fdd0843ba3e868d19c45aed9bb66755d408f442d77dafda4897f62b0658c45"
+    ],
+    "node_chunk_ids": [
+      "e59aa248654ed8f7b4fc931c4606e2855ee30fec6f4ccfc21f171a9cbe3b197e",
+      "89533f4bf9ac2d29ede95643a828f295a89ff7c6655ae648b36fc466cd7e1c24"
+    ],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [
+      "d04bff795cc9954ba08ed6a552183e95ccc3190a9ae29e511ba28fdb935bd3c1"
+    ],
+    "most_influential_node": "sacroiliac joint",
+    "most_influential_edge": null,
+    "most_influential_subpath": "(pelvis, COMPOSED_OF, ligaments)"
+  },
+  {
+    "question_id": "3f020b60-da1a-40fa-93eb-462cbcc61ed2",
+    "primary_path_chunk_ids": [
+      "3f6fce0470c60577e64795ec28d4e7dc02e60de50cad4a1befdf52ce024fdddc",
+      "60ea3c27e0daa9517f775c9086c18fd802a1db0ecfa10c5272f38dbcbc72f5f6",
+      "548eda09d3b9a02592f45cabd8b2d46d0697e0014f718f587a9a569816f7b717",
+      "efa30e3aa37472bc5b1888f4261d15954266b722d724e39ee59fb025386996a1",
+      "a539c7bc023a7a686a9029cab2ba8204f5f1f68ecf670c32c766e47edf59cfc8",
+      "f8c47326499564d0fa520f77b55bc964a3130d4e00079e28e3a25cb8fbfdbe89",
+      "b6eaf468c08654298c74278496cd467fe97bdff947559cba9c462c511f27f945",
+      "acc2b2a21966b1066cadd6bad4d8dba2eb57f4d36b56aa90534cd9bb4dcb5e0c",
+      "a8b31d6b63d5d4b17a2546cb07eed719068d1e85292cb479a22412805e069713",
+      "58f920d6914072b146217d702f220ccdad178f02dec6ac7becc0c0ea63cdc2e5"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": null
+  },
+  {
+    "question_id": "775156bc-1cc6-4d4d-ae0d-852182dfc94e",
+    "primary_path_chunk_ids": [
+      "b083de3b0572c7aa8616071e444f60e405658814c4dfc04c481eb14b0e3f5363",
+      "cfd005bd541b39340d9f4cd10440b62294080c6296e0a6ed20aeda269a4f02ef",
+      "03d115fbdbad1c1cabd9ef5b1ac4af5b33bd7b3ca809ad8cb538c8234de7dd7f",
+      "7172171077a4149dbdcc4283bb43906ad862d32367056ab7a00e059a3355b399",
+      "4adbaa76e61cf0452217367ae52f0905570334a9a95a8eb40199886a64dfb2fa",
+      "284f9261f2976d397dd5e7190e284aedcff5264077b4ec59b2f5b573782fa50c"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": null
+  },
+  {
+    "question_id": "f54f8baa-fab2-4eae-a6d5-2be43f1d2930",
+    "primary_path_chunk_ids": [
+      "b56095c702979c038ecab29b539fd9c187813f20bdcf5be832ec6128141abaab",
+      "fa6d8ed33f4c4e7235ac2c30af05eb71752e308148f395c29a246caa0471a1de",
+      "3b0fb673d5bfb9e82d52a2efc3d82a64bcab25a43b9c059ad1397c3c90158493",
+      "ef60bc239ecfbb7e299b2e74a2c679996f364954e361a39469a3ecc64b9b6cea",
+      "4b5fbde850319eefd1baec30e893d883e0c2a063015c099823a7ea4cbe90a21d",
+      "dd92c7d8d291d51161bb0be4d7b155d40faf38650e046ecf392414cb7ed076b4",
+      "e5769887b712ae8ef083f063b1f6d86abeccff21fd31d5eed7451d0f17fc55ed"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [
+      "fa6d8ed33f4c4e7235ac2c30af05eb71752e308148f395c29a246caa0471a1de"
+    ],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": "(patient, PARTICIPATE_IN, Lymphatic pump treatment)"
+  },
+  {
+    "question_id": "bc191b12-a85e-41ef-99b9-a1aad5fa6c37",
+    "primary_path_chunk_ids": [
+      "96aa15f76a9f47ff7054da35f15ccbf26b24053436d7939907090a9b8f2a6ecf",
+      "1f49ad7e8e33bdb62c0c65ab37fa50ec71de35146a73c90153c3a7672c4b0557",
+      "baee8520340f2afca3f8ec01dd3e291a245402596876f1376435f4bddb9aaf5c",
+      "520322a88ee6c57d2de84bbe111970aa1dfc5059145fadc31d1e928cec2d93f4",
+      "fa6d8ed33f4c4e7235ac2c30af05eb71752e308148f395c29a246caa0471a1de",
+      "3b0fb673d5bfb9e82d52a2efc3d82a64bcab25a43b9c059ad1397c3c90158493",
+      "ef60bc239ecfbb7e299b2e74a2c679996f364954e361a39469a3ecc64b9b6cea",
+      "e32b21e6550213385d3f83d8d6311a45ebae3f599b05f591b4f07d4fdc200822"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": null
+  },
+  {
+    "question_id": "bf28775c-403b-48c9-a5ba-07f1217f17e3",
+    "primary_path_chunk_ids": [
+      "f716e6e2ceba2d264c36461cee3c860caa87a4399b12e7d679b7dfe5361afa9c"
+    ],
+    "node_chunk_ids": [],
+    "edge_chunk_ids": [],
+    "subpath_chunk_ids": [],
+    "most_influential_node": null,
+    "most_influential_edge": null,
+    "most_influential_subpath": null
+  },
+  {
+    "question_id": "566ebfa3-bb52-48eb-bd99-bfddee74eab9",
+    "primary_path_chunk_ids": [
+      "dd92c7d8d291d51161bb0be4d7b155d40faf38650e046ecf392414cb7ed076b4",
+      "d394ad8873bb6426156cb5acbee0cdea847b46415e801a3a5e95b83871a8d467"
+    ],
+    "node_chunk_ids": [
+      "dd92c7d8d291d51161bb0be4d7b155d40faf38650e046ecf392414cb7ed076b4",
+      "d394ad8873bb6426156cb5acbee0cdea847b46415e801a3a5e95b83871a8d467"
+    ],
+    "edge_chunk_ids": [
+      "dd92c7d8d291d51161bb0be4d7b155d40faf38650e046ecf392414cb7ed076b4"
+    ],
+    "subpath_chunk_ids": [
+      "dd92c7d8d291d51161bb0be4d7b155d40faf38650e046ecf392414cb7ed076b4"
+    ],
+    "most_influential_node": "Carvedilol",
+    "most_influential_edge": "heart failure::TREATED_WITH::Carvedilol",
+    "most_influential_subpath": "(heart failure, TREATED_WITH, Carvedilol)"
+  }
+]

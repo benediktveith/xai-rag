@@ -80,6 +80,22 @@ kg_capable = [
     '566ebfa3-bb52-48eb-bd99-bfddee74eab9'
 ]
 
+QUESTION_ID_TO_Q = {
+    "3f63787d-7816-48fe-a623-b61ba10a3001": "Q1",
+    "80a922e3-e55d-4cdc-8a90-3100c3647e99": "Q2",
+    "fc913366-8a30-442c-9769-0e4aa0ad5829": "Q3",
+    "52fd537b-dc7f-4cf1-9a3a-6757ebd9ea31": "Q4",
+    "d710d2f4-0d24-46b4-b50d-9633fe43b73f": "Q5",
+    "dea5db70-e900-4d6e-8851-e3e81b9df816": "Q6",
+    "3f020b60-da1a-40fa-93eb-462cbcc61ed2": "Q7",
+    "775156bc-1cc6-4d4d-ae0d-852182dfc94e": "Q8",
+    "f54f8baa-fab2-4eae-a6d5-2be43f1d2930": "Q9",
+    "bc191b12-a85e-41ef-99b9-a1aad5fa6c37": "Q10",
+    "bf28775c-403b-48c9-a5ba-07f1217f17e3": "Q11",
+    "566ebfa3-bb52-48eb-bd99-bfddee74eab9": "Q12",
+}
+
+
 [rag]
 n_hops = 2
 

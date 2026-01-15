@@ -64,8 +64,7 @@ class KGRAGExPipeline:
     - Antwort nur aus joined paragraph, question, options
     """
 
-    def __init__(self, rag: RAGEngine, kg: KGStore, llm_client: LLMClient):
-        self.rag = rag
+    def __init__(self, kg: KGStore, llm_client: LLMClient):
         self.kg = kg
         self.llm_client = llm_client
 
@@ -91,14 +90,14 @@ class KGRAGExPipeline:
         Do not provide any additional explanation or commentary.
         """.strip()
 
-    def _generate_pseudo_paragraph(self, chain_str: str) -> tuple[str, int]:
+    def _generate_pseudo_paragraph(self, chain_str: str) -> tuple[str, int, int, int]:
         llm = self.llm_client.get_llm()
         if llm is None:
             raise RuntimeError("LLMClient.get_llm() returned None")
 
         chain = (chain_str or "").strip()
         if not chain:
-            return "", 0
+            return "", 0, 0, 0
 
         s = chain.replace("__", "")
         s = (
@@ -115,7 +114,7 @@ class KGRAGExPipeline:
             .replace("\t", "")
         )
         if not any(ch.isalnum() for ch in s):
-            return "", 0
+            return "", 0, 0, 0
 
         prompt = f"""
             You are a medical instructor helping to generate educational materials.
@@ -130,33 +129,40 @@ class KGRAGExPipeline:
             """.strip()
 
         resp = llm.invoke(prompt)
+        tin, tout = self.llm_client._extract_token_usage(resp)
         txt = (getattr(resp, "content", str(resp)) or "").strip()
-        return txt, 1
+        return txt, 1, tin, tout
 
-    def _answer_from_paragraph(self, paragraph: str, question: str, options: str = "") -> tuple[str, int]:
+    def _answer_from_paragraph(self, paragraph: str, question: str, options: str = "") -> tuple[str, int, int, int]:
         llm = self.llm_client.get_llm()
         if llm is None:
             raise RuntimeError("LLMClient.get_llm() returned None")
 
         ctx = (paragraph or "").strip()
         if not ctx:
-            return "", 0
+            return "", 0, 0, 0
 
         msg = self._create_mcq_prompt(ctx, question, options=options)
-        print("MSG to LLM :", msg)
         if hasattr(llm, "with_structured_output"):
             try:
-                llm_so = llm.with_structured_output(_MCQAnswer)
+                llm_so = llm.with_structured_output(_MCQAnswer, include_raw=True)
                 resp = llm_so.invoke(msg)
-                ans = getattr(resp, "answer", None)
+                tin, tout = self.llm_client._extract_token_usage(resp)
+                ans = None
+                if isinstance(resp, dict):
+                    parsed = resp.get("parsed")
+                    ans = getattr(parsed, "answer", None)
+                else:
+                    ans = getattr(resp, "answer", None)
                 if isinstance(ans, str) and ans in ("A", "B", "C", "D"):
-                    return ans, 1
+                    return ans, 1, tin, tout
             except Exception:
                 pass
 
         resp = llm.invoke(msg)
+        tin, tout = self.llm_client._extract_token_usage(resp)
         txt = (getattr(resp, "content", str(resp)) or "").strip()
-        return (txt[:1].upper() if txt else ""), 1
+        return (txt[:1].upper() if txt else ""), 1, tin, tout
 
     def _path_as_chain_str(self, path_lists: PathAsLists) -> str:
         nl = path_lists.node_list or []
@@ -193,14 +199,7 @@ class KGRAGExPipeline:
         for i in range(len(node_list) - 1):
             chain += f"{node_list[i]}->[{edge_list[i]}]->"
         chain += node_list[-1] if node_list else ""
-        
-        print("DEBUG PathAsLists")
-        print("  node_list:", node_list)
-        print("  edge_list:", edge_list)
-        print("  subpath_list:", subpath_list)
-        print("  chain_str:", chain)
-
-
+    
         return PathAsLists(
             node_list=node_list,
             edge_list=edge_list,
@@ -266,10 +265,6 @@ class KGRAGExPipeline:
                 continue
 
             steps = self.path.shortest_path(a, b)
-            print("DEBUG shortest_path steps:")
-            for s in steps:
-                print("  subject:", s.subject, "relation:", s.relation, "object:", s.object)
-
             if not steps:
                 continue
 
@@ -311,18 +306,23 @@ class KGRAGExPipeline:
                     path_lists_used.append(pl)
 
         llm_calls = 0
+        tokens_in = 0
+        tokens_out = 0
         paragraphs: List[str] = []
         for ch in chains:
-            p, c = self._generate_pseudo_paragraph(ch)
+            p, c, tin, tout = self._generate_pseudo_paragraph(ch)
             llm_calls += int(c)
+            tokens_in += int(tin)
+            tokens_out += int(tout)
             if p:
                 paragraphs.append(p)
         joined_paragraphs = "\n".join(paragraphs).strip()
-        print("Joined Paragrahhs: ", joined_paragraphs)
         ans = ""
         if joined_paragraphs:
-            ans, c_ans = self._answer_from_paragraph(joined_paragraphs, question, options=options)
+            ans, c_ans, tin, tout = self._answer_from_paragraph(joined_paragraphs, question, options=options)
             llm_calls += int(c_ans)
+            tokens_in += int(tin)
+            tokens_out += int(tout)
 
         start = str(primary_steps[0].subject) if primary_steps else None
         end = str(primary_steps[-1].object) if primary_steps else None
@@ -343,7 +343,7 @@ class KGRAGExPipeline:
             kg_context=joined_paragraphs,
             retrieved=[],
             answer=ans,
-            tokens_in=0,
-            tokens_out=0,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
             llm_calls=llm_calls,
         )

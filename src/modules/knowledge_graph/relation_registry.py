@@ -9,6 +9,7 @@ _BAD = re.compile(r"[^A-Z0-9_]+")
 
 
 def canon_relation(name: str) -> str:
+    # Canonicalize relation names to UPPER_SNAKE_CASE, stripping unsupported characters.
     s = (name or "").strip().upper()
     s = s.replace(" ", "_")
     s = _BAD.sub("", s)
@@ -18,10 +19,7 @@ def canon_relation(name: str) -> str:
 
 
 def simple_similarity(a: str, b: str) -> float:
-    """
-    Sehr leichte Ähnlichkeitsfunktion ohne externe Dependencies.
-    Reicht aus, um triviale Dubletten wie RELATEDTO vs RELATED_TO zu mergen.
-    """
+    # Lightweight similarity heuristic for relation name de-duplication and aliasing.
     a = canon_relation(a)
     b = canon_relation(b)
     if not a or not b:
@@ -39,6 +37,7 @@ def simple_similarity(a: str, b: str) -> float:
 
 @dataclass
 class ProposedRelation:
+    # Relation proposal payload used for pending review or auto-acceptance into the registry.
     name: str
     description: str = ""
     subject_labels: Optional[List[str]] = None
@@ -48,20 +47,13 @@ class ProposedRelation:
 
 
 class RelationRegistry:
-    """
-    Dynamisches Relations-Lexikon.
-
-    - allowed: kanonische Relationsnamen, die dem LLM als Startset gegeben werden
-    - aliases: Mapping alias -> canonical
-    - pending: neue Vorschläge, die noch nicht final akzeptiert wurden
-    """
-
     def __init__(
         self,
         allowed: Optional[Set[str]] = None,
         aliases: Optional[Dict[str, str]] = None,
         pending: Optional[Dict[str, ProposedRelation]] = None,
     ):
+        # Normalize inputs to canonical form for stable comparisons and persistence.
         self.allowed: Set[str] = set(canon_relation(x) for x in (allowed or set()) if x)
         self.aliases: Dict[str, str] = {}
         for k, v in (aliases or {}).items():
@@ -73,18 +65,17 @@ class RelationRegistry:
         self.pending: Dict[str, ProposedRelation] = dict(pending or {})
 
     def resolve(self, name: str) -> str:
+        # Resolve an alias to its canonical relation name.
         c = canon_relation(name)
         return self.aliases.get(c, c)
 
     def is_allowed(self, name: str) -> bool:
+        # Check whether a relation (after alias resolution) is currently allowed.
         c = self.resolve(name)
         return c in self.allowed
 
     def maybe_merge_as_alias(self, proposed_name: str, threshold: float = 0.88) -> Tuple[bool, str]:
-        """
-        Versucht eine neue Relation als Alias einer bestehenden allowed Relation zu mergen.
-        Gibt (merged, canonical_target) zurück.
-        """
+        # Attempt to merge a proposed relation into an existing allowed relation via similarity.
         p = canon_relation(proposed_name)
         if not p:
             return False, p
@@ -104,10 +95,7 @@ class RelationRegistry:
         return False, p
 
     def propose(self, pr: ProposedRelation, alias_threshold: float = 0.88) -> str:
-        """
-        Nimmt einen Vorschlag entgegen, normalisiert und legt ihn als pending ab,
-        falls er nicht gemerged werden kann und noch nicht allowed ist.
-        """
+        # Normalize the proposal, merge as alias when appropriate, otherwise store/update in pending.
         c = canon_relation(pr.name)
         if not c:
             return ""
@@ -141,9 +129,7 @@ class RelationRegistry:
         return c
 
     def accept(self, name: str, aliases: Optional[List[str]] = None) -> str:
-        """
-        Akzeptiert eine Relation in allowed und optional ihre Aliase.
-        """
+        # Accept a relation into the allowed set, optionally registering additional aliases.
         c = canon_relation(name)
         if not c:
             return ""
@@ -157,13 +143,16 @@ class RelationRegistry:
         return c
 
     def reject(self, name: str) -> None:
+        # Remove a relation proposal from pending.
         c = canon_relation(name)
         self.pending.pop(c, None)
 
     def snapshot_allowed_sorted(self) -> List[str]:
+        # Return allowed relations in a stable order for prompting and persistence.
         return sorted(self.allowed)
 
     def save(self, path: Path) -> None:
+        # Persist registry state to disk as JSON.
         rec = {
             "allowed": sorted(self.allowed),
             "aliases": dict(self.aliases),
@@ -174,6 +163,7 @@ class RelationRegistry:
 
     @classmethod
     def load(cls, path: Path) -> "RelationRegistry":
+        # Load registry state from disk, falling back to canonical defaults when no file exists.
         if not path.exists():
             # Startet sauber mit Defaults in kanonischer Form
             allowed = set(canon_relation(x) for x in _DEFAULT_RELATIONS() if x)
@@ -188,11 +178,13 @@ class RelationRegistry:
             try:
                 pending[k] = ProposedRelation(**(v or {}))
             except Exception:
+                # Defensive fallback when persisted pending payloads are malformed.
                 pending[k] = ProposedRelation(name=k, description=str(v or ""))
         return cls(allowed=allowed, aliases=aliases, pending=pending)
 
 
 def _DEFAULT_RELATIONS() -> List[str]:
+    # Baseline relation set used when no registry file is present.
     return [
         "has_symptom",
         "has_risk_factor",

@@ -1,9 +1,7 @@
-# src/modules/knowledge_graph/kg_store.py
-
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import networkx as nx
 
@@ -13,6 +11,7 @@ _WS = re.compile(r"\s+")
 
 
 def _norm_text(s: str) -> str:
+    # Normalize whitespace and non-breaking spaces, preserving original casing for display.
     s = (s or "").strip()
     s = s.replace("\u00a0", " ")
     s = _WS.sub(" ", s)
@@ -20,10 +19,12 @@ def _norm_text(s: str) -> str:
 
 
 def _canon_node(s: str) -> str:
+    # Canonical node key used for alias resolution, case-insensitive and whitespace-normalized.
     return _norm_text(s).casefold()
 
 
 def _dedup_preserve_order(xs: List[str]) -> List[str]:
+    # De-duplicate a list while preserving first-seen order.
     out: List[str] = []
     seen = set()
     for x in xs:
@@ -35,24 +36,13 @@ def _dedup_preserve_order(xs: List[str]) -> List[str]:
 
 
 class KGStore:
-    """
-    KG Store als MultiDiGraph.
-
-    Wichtige Änderung für inkrementelles Speichern:
-    - Zusätzlich zum Snapshot Format (save_jsonl) unterstützt dieser Store ein Event Log Format,
-      das pro neuem KGTriple eine JSONL Zeile appendet.
-    - load_jsonl kann beide Formate lesen, Snapshot Zeilen und Event Zeilen.
-
-    Vorteil:
-    - Der Build kann nach jedem Triple sicher persistieren, ohne den kompletten Graphen neu zu schreiben.
-    - Beim Laden werden Event Zeilen einfach replayed und in denselben Aggregationsmechanismus gemerged.
-    """
-
     def __init__(self):
+        # MultiDiGraph supports multiple relations (keys) between the same node pair.
         self.g = nx.MultiDiGraph()
         self._alias_by_canon: Dict[str, str] = {}
 
     def _resolve_node_id(self, name: str) -> str:
+        # Map arbitrary node strings to a stable, canonicalized ID while retaining a representative raw label.
         raw = _norm_text(name)
         if not raw:
             return ""
@@ -63,6 +53,7 @@ class KGStore:
         return raw
 
     def _ensure_node(self, node: str, node_type: str) -> str:
+        # Ensure the node exists and track its type, recording conflicts instead of overwriting.
         nid = self._resolve_node_id(node)
         if not nid:
             return ""
@@ -86,17 +77,15 @@ class KGStore:
         return nid
 
     def node_name(self, node: str) -> str:
+        # Public helper to mirror stored node labels as strings.
         return str(node or "")
 
     def node_type(self, node: str) -> str:
+        # Return the stored node type, defaulting to "Unknown".
         return str(self.g.nodes[node].get("type", "Unknown"))
 
     def edge_attr(self, u: str, v: str, relation_key: Optional[str] = None) -> Optional[dict]:
-        """
-        Gibt Edge Attribute zurück.
-        - Wenn relation_key None: gibt die erste Kante zurück, falls vorhanden.
-        - Wenn relation_key gesetzt: gibt genau diese Kante zurück.
-        """
+        # Read edge attributes, optionally selecting a specific MultiDiGraph key.
         if not u or not v:
             return None
         if relation_key is None:
@@ -113,9 +102,11 @@ class KGStore:
             return dict(self.g.get_edge_data(u, v, relation_key) or {})
 
     def stats(self) -> Dict[str, int]:
+        # Basic graph size statistics.
         return {"nodes": self.g.number_of_nodes(), "edges": self.g.number_of_edges()}
 
     def add_triples(self, triples: Iterable[KGTriple]) -> None:
+        # Insert triples into the graph, aggregating observations under an edge keyed by relation.
         for t in triples:
             u = self._ensure_node(t.subject, t.subject_type)
             v = self._ensure_node(t.object, t.object_type)
@@ -132,7 +123,7 @@ class KGStore:
 
             obs = {"relation": rel, "source": src, "chunk_id": cid, "meta": meta}
 
-            key = rel  # Relation als Edge Key, verhindert Mixing
+            key = rel
 
             if self.g.has_edge(u, v, key=key):
                 data = dict(self.g.get_edge_data(u, v, key) or {})
@@ -170,25 +161,7 @@ class KGStore:
                 )
 
     def append_jsonl_events(self, path: Path, triples: Iterable[KGTriple], *, flush: bool = True) -> int:
-        """
-        Appendet pro KGTriple eine JSONL Zeile im Event Format.
-
-        Event Format Zeile:
-        {
-          "schema": "kg_event_v1",
-          "subject": "...",
-          "object": "...",
-          "relation": "...",
-          "subject_type": "...",
-          "object_type": "...",
-          "source": "...",
-          "chunk_id": "...",
-          "meta": {...}
-        }
-
-        Das ist bewusst nicht das Snapshot Format von save_jsonl, weil Snapshot Updates bei bestehenden Kanten
-        sonst eine komplette Datei Rewrite Operation erfordern würden.
-        """
+        # Append KGTriple events as JSONL lines, enabling incremental persistence without rewriting snapshots.
         path.parent.mkdir(parents=True, exist_ok=True)
         written = 0
         with open(path, "a", encoding="utf-8") as f:
@@ -213,10 +186,7 @@ class KGStore:
         return written
 
     def save_jsonl(self, path: Path) -> None:
-        """
-        Snapshot Export, schreibt den aktuellen aggregierten Graph Zustand.
-        Dieses Format entspricht deinem bisherigen save_jsonl, bleibt kompatibel.
-        """
+        # Write a full snapshot of the aggregated graph, compatible with the existing JSONL snapshot format.
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             for u, v, key, data in self.g.edges(keys=True, data=True):
@@ -242,16 +212,7 @@ class KGStore:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def load_jsonl(self, path: Path, *, ignore_bad_lines: bool = True) -> None:
-        """
-        Lädt JSONL in den Graph.
-
-        Unterstützt zwei Formate:
-        1) Snapshot Format Zeilen mit Feldern wie u,v,key,observations,...
-        2) Event Format Zeilen mit schema == kg_event_v1 und Feldern subject,object,relation,...
-
-        ignore_bad_lines:
-        - True überspringt kaputte JSON Zeilen, wichtig wenn ein Prozess beim Append abstürzt.
-        """
+        # Load a snapshot and/or event log into the graph, tolerating partial writes when configured.
         self.g.clear()
         self._alias_by_canon.clear()
 
@@ -271,6 +232,7 @@ class KGStore:
                         continue
                     raise
 
+                # Event format: replay as KGTriple insertions to rebuild aggregated edge observations.
                 if isinstance(rec, dict) and rec.get("schema") == "kg_event_v1":
                     t = KGTriple(
                         subject=str(rec.get("subject", "") or ""),
@@ -285,7 +247,6 @@ class KGStore:
                     self.add_triples([t])
                     continue
 
-                # Snapshot Format
                 if not isinstance(rec, dict):
                     continue
 
@@ -301,6 +262,7 @@ class KGStore:
                 chunk_ids = list(rec.get("chunk_ids") or [])
 
                 observations = list(rec.get("observations") or [])
+                # Backfill observations for older snapshots that stored relations/metas separately.
                 if not observations:
                     relations = list(rec.get("relations") or [])
                     metas = list(rec.get("metas") or [])

@@ -58,7 +58,7 @@ class LimeExplainer:
                     prediction_fn,
                     labels=(1,), 
                     num_features=10000, 
-                    num_samples=500 
+                    num_samples=3000 
                 )
 
                 # Extract data for Class 1

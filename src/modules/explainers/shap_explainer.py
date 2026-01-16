@@ -105,7 +105,7 @@ class ShapExplainer:
 
                 instance_to_explain = np.ones((1, num_tokens))
                 
-                nsamples = "auto"
+                nsamples = 100*num_tokens
 
                 shap_values = explainer.shap_values(instance_to_explain, nsamples=nsamples, silent=True)[0]
                 
@@ -113,10 +113,13 @@ class ShapExplainer:
                 mean_shap = np.mean(shap_values)
                 centered_shap_values = shap_values - mean_shap
 
+                # Aggregate Tokens back to full words
+                words, shap_values = self.aggregate_shap_to_words(shap_values, display_tokens)
+
                 explanations_hop.append ({
                     "shap_values": shap_values,
                     "centered_shap_values": centered_shap_values,
-                    "tokens": display_tokens,
+                    "tokens": words, # display_tokens
                     "base_text": doc_text,
                     "query": query,
                     "score": prediction_fn(instance_to_explain)[0],
@@ -356,7 +359,7 @@ class ShapExplainer:
         
         html_parts.append(f"<div style='border:1px solid #ddd; padding:15px; font-family:sans-serif; line-height:1.6;'>")
         html_parts.append(f"<h4>Similarity Heatmap (Query: <i>{explanations['query']}</i>)</h4>")
-        html_parts.append(f"<p style='font-size:14px; color:gray'><b>HINT</b>: Some words are split by the Tokenizer. Every part of the split word, starting with the second, have a leading <b>\"##\"</b> (plexus = pl ##ex ##us).</p>")
+        html_parts.append(f"<p style='font-size:14px; color:gray'><b>HINT</b>: Some words are split by the Tokenizer. There were put back together and shap values aggregated.</p>")
         html_parts.append(f"<p style='font-size:12px; color:gray'><b>Red</b> = Increases Similarity | <b>Blue</b> = Decreases Similarity</p>")
         
         for index, token in enumerate(tokens):
@@ -369,3 +372,38 @@ class ShapExplainer:
         
         # Render
         display(HTML(" ".join(html_parts)))
+
+    def aggregate_shap_to_words(self, shap_values, tokens):
+        """
+        Aggregates BERT-style subword tokens (e.g., "##ing") into whole words
+        and sums their SHAP values.
+        """
+        word_map = []
+        word_scores = []
+        
+        current_word = ""
+        current_score = 0.0
+        
+        for token, score in zip(tokens, shap_values):
+            # For BERT (MiniLM), subwords start with ##
+            
+            if token.startswith("##"):
+                # It's a continuation of the previous word
+                current_word += token.replace("##", "")
+                current_score += score
+            else:
+                # It's a new word. Save the previous one if it exists.
+                if current_word != "":
+                    word_map.append(current_word)
+                    word_scores.append(current_score)
+                
+                # Start tracking the new word
+                current_word = token
+                current_score = score
+                
+        # Append the last remaining word
+        if current_word:
+            word_map.append(current_word)
+            word_scores.append(current_score)
+            
+        return np.array(word_map), np.array(word_scores)

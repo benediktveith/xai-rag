@@ -1,5 +1,3 @@
-# src/modules/knowledge_graph/kg_path_service.py
-
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -11,6 +9,7 @@ from src.modules.knowledge_graph.kg_store import KGStore
 
 @dataclass(frozen=True)
 class PathAsLists:
+    # Lightweight, serializable representation of a path: nodes, relations, per-hop triples, and a rendered chain string.
     node_list: List[str]
     edge_list: List[str]
     subpath_list: List[Tuple[str, str, str]]
@@ -18,21 +17,11 @@ class PathAsLists:
 
 
 class KGPathService:
-    """
-    MultiDiGraph kompatibel.
-
-    Liefert:
-      - shortest_path_nodes: Knotenpfad (undirected)
-      - shortest_path: deterministische Variante, respektiert Kantenrichtung
-
-    Hinweis, Varianten sind weiterhin vorhanden für andere Teile deines Codes,
-    die Notebook konforme Pipeline nutzt sie nicht.
-    """
-
     def __init__(self, kg: KGStore):
         self.kg = kg
 
     def shortest_path_nodes(self, start: str, end: str, cutoff: Optional[int] = None) -> List[str]:
+        # Compute shortest path on an undirected view, used as a fallback when directed shortest path fails.
         if start not in self.kg.g or end not in self.kg.g:
             return []
         G_und = self.kg.g.to_undirected(as_view=True)
@@ -45,6 +34,7 @@ class KGPathService:
             return []
 
     def _score_edge_data(self, data: Dict[str, Any]) -> Tuple[int, int, str]:
+        # Prefer edges backed by non-synthetic observations, then by observation count, then by relation name.
         d = dict(data or {})
         rel = str(d.get("relation") or "").strip()
 
@@ -61,6 +51,7 @@ class KGPathService:
         return (has_nonsynth, obs_n, rel)
 
     def _candidate_edges_between(self, u: str, v: str, top_n: int = 3) -> List[Tuple[str, Dict[str, Any]]]:
+        # Return the top-N relation candidates for a multi-edge (u, v) pair, ranked by backing evidence.
         if not u or not v:
             return [("related_to", {})]
 
@@ -89,9 +80,11 @@ class KGPathService:
         return out if out else [("related_to", {})]
 
     def _best_edge_between(self, u: str, v: str) -> Tuple[str, Dict[str, Any]]:
+        # Convenience wrapper returning the single best relation candidate between two nodes.
         return self._candidate_edges_between(u, v, top_n=1)[0]
 
     def shortest_path(self, start: str, end: str, cutoff: Optional[int] = None) -> List[KGStep]:
+        # Compute a shortest path as KGStep objects, resolving per-hop relation data from the stored multigraph.
         if start not in self.kg.g or end not in self.kg.g:
             return []
 
@@ -117,6 +110,7 @@ class KGPathService:
         return steps
 
     def _steps_to_lists(self, steps: List[KGStep]) -> PathAsLists:
+        # Convert KGStep path to PathAsLists for downstream rendering and perturbation workflows.
         if not steps:
             return PathAsLists(node_list=[], edge_list=[], subpath_list=[], chain_str="")
 

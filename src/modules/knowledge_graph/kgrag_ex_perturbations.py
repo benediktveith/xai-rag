@@ -1,5 +1,3 @@
-# src/modules/knowledge_graph/kgrag_ex_perturbations.py
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,6 +8,7 @@ from src.modules.knowledge_graph.kg_path_service import PathAsLists
 
 @dataclass(frozen=True)
 class ChainPerturbation:
+    # Single perturbation instance: what was removed, how, and which entities to treat as salient.
     kind: str
     removed: str
     chain_str: str
@@ -17,14 +16,8 @@ class ChainPerturbation:
 
 
 class KGPerturbationFactory:
-    """
-    Notebook konform:
-    - node, ersetze genau einen Knoten durch "__", inklusive Endpunkte
-    - edge, ersetze genau eine Relation durch "__"
-    - subpath, ersetze ein Tripel (u, rel, v) als Block ("__","__","__"), dann Notebook Cleaning und format_edge_path
-    """
-
     def _build_chain(self, nodes: List[str], edges: List[str]) -> str:
+        # Render a chain string from node and edge lists using the canonical "node->[rel]->" pattern.
         if len(nodes) < 2 or len(edges) < 1:
             return ""
         out = ""
@@ -35,6 +28,7 @@ class KGPerturbationFactory:
         return out
 
     def _format_edge_path(self, elements: List[str]) -> str:
+        # Render an alternating [node, rel, node, rel, ... node] list into a chain string.
         if not elements:
             return ""
         out = ""
@@ -44,6 +38,7 @@ class KGPerturbationFactory:
         return out
 
     def _remove_duplicates_except_underscores(self, lst: List[str]) -> List[str]:
+        # De-duplicate elements while preserving order, but keep "__" placeholders intact.
         seen = set()
         res = []
         for x in lst:
@@ -55,6 +50,7 @@ class KGPerturbationFactory:
         return res
 
     def _remove_direct_neighbors_only(self, data: List[str]) -> List[str]:
+        # Drop immediate neighbors around "__" placeholders to remove local context for subpath perturbations.
         idx_rm = set()
         for i, v in enumerate(data):
             if v == "__":
@@ -65,6 +61,7 @@ class KGPerturbationFactory:
         return [v for i, v in enumerate(data) if i not in idx_rm]
 
     def generate(self, path_lists: PathAsLists) -> List[ChainPerturbation]:
+        # Generate node, edge, and subpath perturbations for a given path representation.
         node_list = list(path_lists.node_list or [])
         edge_list = list(path_lists.edge_list or [])
         subpath_list = list(path_lists.subpath_list or [])
@@ -75,6 +72,7 @@ class KGPerturbationFactory:
         out: List[ChainPerturbation] = []
         seen: Set[Tuple[str, str]] = set()
 
+        # Node perturbations: replace exactly one node (including endpoints) with "__".
         for i in range(len(node_list)):
             pert_nodes = node_list[:]
             pert_nodes[i] = "__"
@@ -92,6 +90,7 @@ class KGPerturbationFactory:
                 )
             )
 
+        # Edge perturbations: replace exactly one relation with "__".
         for i in range(len(edge_list)):
             pert_edges = edge_list[:]
             pert_edges[i] = "__"
@@ -110,6 +109,7 @@ class KGPerturbationFactory:
                 )
             )
 
+        # Subpath perturbations: replace one (u, rel, v) triple with ("__", "__", "__"), then clean and re-render.
         for i in range(len(subpath_list)):
             pert = subpath_list[:]
             removed_trip = subpath_list[i]

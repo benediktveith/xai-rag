@@ -14,6 +14,7 @@ from src.modules.knowledge_graph.relation_registry import RelationRegistry, Prop
 
 _JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
 
+# Canonical entity types used for KGTriple.subject_type / object_type.
 EntityType = Literal[
     "Disease",
     "RiskFactor",
@@ -28,6 +29,7 @@ EntityType = Literal[
     "Other",
 ]
 
+# Allowed UI-facing labels returned by the extractor and accepted for typing.
 _ALLOWED_LABELS: Set[str] = {
     "Diseases",
     "Medications",
@@ -39,6 +41,7 @@ _ALLOWED_LABELS: Set[str] = {
     "Procedures",
 }
 
+# Mapping from extractor labels to internal canonical entity types.
 _LABEL_TO_TYPE: Dict[str, EntityType] = {
     "Diseases": "Disease",
     "Medications": "Medication",
@@ -54,6 +57,7 @@ _WS = re.compile(r"\s+")
 _HAS_SENTENCE_PUNCT = re.compile(r"[.!?]")
 _MULTI_PUNCT = re.compile(r"[;,]{1,}")
 
+# Single-letter options and common MCQ artifacts that must not leak into entities.
 _BAD_SINGLE = {"A", "B", "C", "D"}
 
 _MAX_ENTITY_TOKENS = 6
@@ -101,6 +105,7 @@ _REL_LABEL_RULES: Dict[str, Dict[str, Any]] = {
 
 
 def _extract_first_json_object(text: str) -> Optional[dict]:
+    # Best-effort extraction of the first JSON object from arbitrary text (e.g., LLM parser errors).
     if not text:
         return None
     m = _JSON_OBJ.search(text)
@@ -112,11 +117,13 @@ def _extract_first_json_object(text: str) -> Optional[dict]:
         return None
 
 def _coerce_list_of_dicts(x: Any) -> List[dict]:
+    # Coerce unknown values into a list of dicts, filtering out non-dicts.
     if not isinstance(x, list):
         return []
     return [t for t in x if isinstance(t, dict)]
 
 def _filter_valid_triples_dicts(triples: List[dict]) -> List[dict]:
+    # Filter to only those dicts that contain all required string fields for a triple.
     req = ["subject", "subject_label", "relation", "object", "object_label"]
     out: List[dict] = []
     for t in triples:
@@ -131,6 +138,7 @@ def _filter_valid_triples_dicts(triples: List[dict]) -> List[dict]:
     return out
 
 def _norm_text(s: str) -> str:
+    # Whitespace normalization used across entity cleanup and metadata normalization.
     s = (s or "").strip()
     s = s.replace("\u00a0", " ")
     s = _WS.sub(" ", s)
@@ -138,6 +146,7 @@ def _norm_text(s: str) -> str:
 
 
 def _token_count(s: str) -> int:
+    # Token counter used to enforce compact entity phrases.
     s = _norm_text(s)
     if not s:
         return 0
@@ -145,6 +154,7 @@ def _token_count(s: str) -> int:
 
 
 def _looks_like_sentence_fragment(s: str) -> bool:
+    # Heuristics to reject entities that look like sentences or overly long fragments.
     t = _norm_text(s)
     if not t:
         return True
@@ -160,6 +170,7 @@ def _looks_like_sentence_fragment(s: str) -> bool:
 
 
 def _is_bad_entity(ent: str) -> bool:
+    # Reject MCQ artifacts, booleans, pure numerics, and sentence-like fragments.
     e = _norm_text(ent)
     if not e:
         return True
@@ -177,6 +188,7 @@ def _is_bad_entity(ent: str) -> bool:
 
 
 def _clean_entity(ent: str) -> str:
+    # Normalize and strip leading MCQ markers like "A:" or "B)".
     e = _norm_text(ent)
     e = re.sub(r"^[A-D]\s*:\s*", "", e)
     e = re.sub(r"^[A-D]\)\s*", "", e)
@@ -186,6 +198,7 @@ def _clean_entity(ent: str) -> str:
 
 
 def _strip_mc_options(text: str) -> str:
+    # Remove multiple choice option lines (A:, B), etc.) before extraction.
     lines = (text or "").splitlines()
     kept: List[str] = []
     for ln in lines:
@@ -199,6 +212,7 @@ def _strip_mc_options(text: str) -> str:
 
 
 def _extract_evidence_span(text: str, e1: str, e2: str, max_words: int = 25) -> str:
+    # Extract a short snippet around both entity mentions to store as provenance evidence.
     t = _norm_text(text)
     if not t:
         return ""
@@ -251,6 +265,7 @@ def _validate_or_swap_by_labels(
     e2: str,
     l2: str,
 ) -> Optional[Tuple[str, str, str, str]]:
+    # Validate subject/object label constraints for a relation, optionally swapping if allowed.
     rule = _REL_LABEL_RULES.get(rel_up)
     if rule is None:
         if l1 in _ALLOWED_LABELS and l2 in _ALLOWED_LABELS:
@@ -270,6 +285,7 @@ def _validate_or_swap_by_labels(
 
 
 class ProposedRelationOut(BaseModel):
+    # LLM-facing schema for proposing a new relation when no allowed relation fits.
     name: str = Field(..., description="Neue Relation in UPPER_SNAKE_CASE, z.B. ASSOCIATED_WITH")
     description: str = Field("", description="Kurzbeschreibung der Semantik")
     subject_labels: Optional[List[str]] = Field(default=None, description="Optional, z.B. ['Diseases']")
@@ -278,6 +294,7 @@ class ProposedRelationOut(BaseModel):
 
 
 class ExtractedTripleOut(BaseModel):
+    # LLM-facing schema for an extracted triple with label-typed endpoints.
     subject: str
     subject_label: str
     relation: str
@@ -286,6 +303,7 @@ class ExtractedTripleOut(BaseModel):
 
 
 class KGExtractionOutput(BaseModel):
+    # Structured extraction result: triples plus any newly proposed relations.
     triples: List[ExtractedTripleOut] = Field(default_factory=list)
     new_relations: List[ProposedRelationOut] = Field(default_factory=list)
     notes: Optional[str] = None
@@ -293,18 +311,13 @@ class KGExtractionOutput(BaseModel):
 
 @dataclass
 class TripletExtractionResult:
+    # Concrete extraction result returned by KGTripletExtractor, including parsed payload and raw error context if any.
     triples: List[KGTriple]
     raw: str
     parsed: Dict[str, Any]
 
 
 class KGTripletExtractor:
-    """
-    Tripel-Extractor mit:
-    - dynamischem RelationRegistry Set
-    - strukturiertem Output via with_structured_output
-    """
-
     def __init__(
         self,
         llm_client: LLMClient,
@@ -319,12 +332,13 @@ class KGTripletExtractor:
         self.auto_accept_new_relations = bool(auto_accept_new_relations)
         self.alias_threshold = float(alias_threshold)
 
-        # seed defaults if registry empty
+        # Seed default relations when the registry is empty to provide the LLM a stable baseline.
         if not self.registry.allowed:
             for r in _DEFAULT_ALLOWED_RELATIONS:
                 self.registry.accept(r)
 
     def _prompt(self, doc: Document, chunk_id: str, source: str) -> str:
+        # Build a strict JSON-schema grounded prompt, including allowed labels and current allowed relations.
         raw = (doc.page_content or "").strip()
         meta = doc.metadata or {}
         title = str(meta.get("title", meta.get("topic_name", ""))).strip()
@@ -381,6 +395,7 @@ class KGTripletExtractor:
         chunk_id: str,
         source: str,
     ) -> List[KGTriple]:
+        # Post-process structured output: register new relations, validate triples, and attach provenance metadata.
         meta0 = doc.metadata or {}
         text = (doc.page_content or "").strip()
 
@@ -411,6 +426,7 @@ class KGTripletExtractor:
             l1c = _norm_text(t.subject_label)
             l2c = _norm_text(t.object_label)
 
+            # Enforce allowed labels and entity hygiene to avoid polluting the KG.
             if l1c not in _ALLOWED_LABELS or l2c not in _ALLOWED_LABELS:
                 continue
             if _is_bad_entity(e1c) or _is_bad_entity(e2c):
@@ -418,6 +434,7 @@ class KGTripletExtractor:
             if e1c.lower() == e2c.lower():
                 continue
 
+            # Resolve relation through the registry and store canonical UPPER_SNAKE_CASE.
             rel_canon = self.registry.resolve(t.relation)
             rel_up = canon_relation(rel_canon)
             if not rel_up:
@@ -438,7 +455,7 @@ class KGTripletExtractor:
             triples.append(
                 KGTriple(
                     subject=e1f,
-                    relation=rel_up,  # store canonical UPPER_SNAKE_CASE
+                    relation=rel_up,
                     object=e2f,
                     subject_type=_LABEL_TO_TYPE.get(l1f, "Other"),
                     object_type=_LABEL_TO_TYPE.get(l2f, "Other"),
@@ -462,6 +479,7 @@ class KGTripletExtractor:
         return triples
 
     def _extract_structured(self, doc: Document, chunk_id: str, source: str) -> TripletExtractionResult:
+        # Invoke the LLM with structured output, retrying and attempting partial recovery on schema errors.
         llm = self.llm_client.get_llm()
         if llm is None:
             raise RuntimeError("LLMClient.get_llm() returned None")
@@ -487,6 +505,7 @@ class KGTripletExtractor:
             except (OutputParserException, ValidationError) as e:
                 last_raw = str(e)
 
+                # Attempt to recover by extracting a JSON object embedded in the error string.
                 raw_obj = _extract_first_json_object(last_raw)
                 if not isinstance(raw_obj, dict):
                     continue
@@ -500,9 +519,7 @@ class KGTripletExtractor:
                     continue
 
                 try:
-                    out = KGExtractionOutput.model_validate(
-                        {"triples": triples_dicts, "new_relations": newrels_dicts, "notes": raw_obj.get("notes")}
-                    )
+                    out = KGExtractionOutput.model_validate({"triples": triples_dicts, "new_relations": newrels_dicts, "notes": raw_obj.get("notes")})
                 except Exception:
                     continue
 
@@ -518,4 +535,5 @@ class KGTripletExtractor:
         return TripletExtractionResult(triples=[], raw=last_raw, parsed=last_parsed)
 
     def extract(self, doc: Document, chunk_id: str, source: str) -> TripletExtractionResult:
+        # Public entrypoint, currently delegating to the structured extraction implementation.
         return self._extract_structured(doc, chunk_id, source)

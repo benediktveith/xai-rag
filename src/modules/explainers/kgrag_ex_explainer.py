@@ -1,5 +1,3 @@
-# src/modules/knowledge_graph/kgrag_ex_explainer.py
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,11 +5,11 @@ from typing import List, Optional
 
 from src.modules.knowledge_graph.kgrag_ex_pipeline import KGRAGExPipeline, KGRAGRun
 from src.modules.knowledge_graph.kgrag_ex_perturbations import KGPerturbationFactory, ChainPerturbation
-from src.modules.knowledge_graph.kg_path_service import PathAsLists
 
 
 @dataclass(frozen=True)
 class Sensitivity:
+    # Aggregate statistics describing how often perturbations change the final answer.
     node_changed: int
     edge_changed: int
     subpath_changed: int
@@ -22,6 +20,7 @@ class Sensitivity:
 
 @dataclass(frozen=True)
 class PerturbationOutcome:
+    # Result of a single perturbation applied to one path and its impact on the answer.
     path_idx: int
     kind: str
     removed: str
@@ -37,6 +36,7 @@ class PerturbationOutcome:
 
 @dataclass
 class KGRAGExplainReport:
+    # Explanation report, containing the baseline run and all perturbation outcomes.
     base_answer: str
     base_chains: List[str]
     base_paragraph: str
@@ -54,19 +54,12 @@ class KGRAGExplainReport:
 
 
 class KGRAGExExplainer:
-    """
-    Notebook konform:
-    - Perturbations für ALLE Pfade
-    - Pro Perturbation wird genau eine Chain ersetzt, alle anderen bleiben
-    - Paragraph wird pro Chain generiert, dann gejoint
-    - changed, wenn Antwort ungleich Base Antwort
-    """
-
     def __init__(self, pipeline: KGRAGExPipeline):
         self.pipeline = pipeline
         self.factory = KGPerturbationFactory()
 
     def _sensitivity(self, outcomes: List[PerturbationOutcome]) -> Sensitivity:
+        # Compute per-perturbation-kind counts, changed vs total.
         def _counts(kind: str) -> tuple[int, int]:
             xs = [o for o in outcomes if o.kind == kind]
             return sum(1 for o in xs if o.answer_changed), len(xs)
@@ -84,6 +77,7 @@ class KGRAGExExplainer:
         )
 
     def _build_joined_paragraph_from_chains(self, chains: List[str]) -> tuple[str, int, int, int]:
+        # Generate pseudo-paragraphs for each chain and join them, aggregating usage metrics.
         llm_calls = 0
         tokens_in = 0
         tokens_out = 0
@@ -99,11 +93,14 @@ class KGRAGExExplainer:
         return joined, llm_calls, tokens_in, tokens_out
 
     def explain(self, run: KGRAGRun, options: str = "") -> KGRAGExplainReport:
+        # Perturb each path chain, recompose the paragraph, re-answer, and record deltas vs baseline.
         base_answer = (run.answer or "").strip()
         base_paragraph = run.kg_paragraph or ""
 
+        # One chain string per path list entry, empty string if missing.
         base_chains: List[str] = [pl.chain_str or "" for pl in (run.path_lists or [])]
 
+        # No paths means no perturbations, return an empty report with zeroed metrics.
         if not run.path_lists:
             sens = self._sensitivity([])
             return KGRAGExplainReport(
@@ -126,6 +123,7 @@ class KGRAGExExplainer:
         total_in = 0
         total_out = 0
 
+        # Iterate each path, generate perturbations, swap the perturbed chain into place, then re-run answer.
         for path_idx, pl in enumerate(run.path_lists):
             perturbations: List[ChainPerturbation] = self.factory.generate(pl)
 
@@ -146,6 +144,7 @@ class KGRAGExExplainer:
                 total_in += tin
                 total_out += tout
 
+                # Treat "change" only as multiple-choice label flips.
                 changed = (
                     base_answer in ("A", "B", "C", "D")
                     and ans in ("A", "B", "C", "D")
@@ -168,6 +167,7 @@ class KGRAGExExplainer:
                     )
                 )
 
+        # Pick the first element per kind that causes an answer flip as a simple "most influential" proxy.
         most_node = next((o.removed for o in outcomes if o.kind == "node" and o.answer_changed), None)
         most_edge = next((o.removed for o in outcomes if o.kind == "edge" and o.answer_changed), None)
         most_sub = next((o.removed for o in outcomes if o.kind == "subpath" and o.answer_changed), None)
@@ -187,4 +187,3 @@ class KGRAGExExplainer:
             tokens_in=total_in,
             tokens_out=total_out,
         )
-

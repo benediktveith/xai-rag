@@ -1,5 +1,3 @@
-# src/modules/kgragex/kgragex_pipeline.py
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,7 +6,6 @@ from typing import List, Optional, Dict, Any, Literal
 import inspect
 from pydantic import BaseModel, Field
 
-from src.modules.rag.rag_engine import RAGEngine
 from src.modules.llm.llm_client import LLMClient
 
 from src.modules.knowledge_graph.kg_path_service import PathAsLists
@@ -20,6 +17,7 @@ from src.modules.knowledge_graph.kg_schema import KGStep
 
 @dataclass
 class RetrievedChunk:
+    # Represents a single retrieved text chunk, plus its retrieval metadata.
     chunk_id: str
     score: float
     title: str
@@ -29,6 +27,7 @@ class RetrievedChunk:
 
 @dataclass
 class KGRAGRun:
+    # Captures a full KGRAG run, including KG traversal artifacts, prompt context, and usage metrics.
     question_id: str
     question: str
     gold_answer: Optional[str]
@@ -52,26 +51,21 @@ class KGRAGRun:
 
 
 class _MCQAnswer(BaseModel):
+    # Structured output schema for enforcing a single multiple choice letter.
     answer: Literal["A", "B", "C", "D"] = Field(...)
 
 
 class KGRAGExPipeline:
-    """
-    Notebook konform:
-    - LLM extrahiert Entity Paare
-    - Für jedes Paar shortest path im KG
-    - Pfad zu pseudo paragraph, join über alle Pfade
-    - Antwort nur aus joined paragraph, question, options
-    """
-
     def __init__(self, kg: KGStore, llm_client: LLMClient):
         self.kg = kg
         self.llm_client = llm_client
 
+        # Services for entity extraction / node mapping, and path computation over the KG.
         self.query = KGQueryService(kg, llm_client=llm_client)
         self.path = KGPathService(kg)
 
     def _create_mcq_prompt(self, paragraph: str, question: str, options: str = "") -> str:
+        # Build a strict instruction prompt, optionally appending the options section.
         full_question = question if not options else f"{question}\n\nOptions:\n{options}"
         return f"""
         You are a knowledgeable medical assistant.
@@ -91,6 +85,7 @@ class KGRAGExPipeline:
         """.strip()
 
     def _generate_pseudo_paragraph(self, chain_str: str) -> tuple[str, int, int, int]:
+        # Convert a KG chain string into a short, coherent educational paragraph via the LLM.
         llm = self.llm_client.get_llm()
         if llm is None:
             raise RuntimeError("LLMClient.get_llm() returned None")
@@ -99,6 +94,7 @@ class KGRAGExPipeline:
         if not chain:
             return "", 0, 0, 0
 
+        # Fast guard against chains that are effectively only punctuation / formatting noise.
         s = chain.replace("__", "")
         s = (
             s.replace("->", "")
@@ -134,6 +130,7 @@ class KGRAGExPipeline:
         return txt, 1, tin, tout
 
     def _answer_from_paragraph(self, paragraph: str, question: str, options: str = "") -> tuple[str, int, int, int]:
+        # Answer the MCQ using only the generated paragraph as context, with a structured-output fast path when available.
         llm = self.llm_client.get_llm()
         if llm is None:
             raise RuntimeError("LLMClient.get_llm() returned None")
@@ -157,6 +154,7 @@ class KGRAGExPipeline:
                 if isinstance(ans, str) and ans in ("A", "B", "C", "D"):
                     return ans, 1, tin, tout
             except Exception:
+                # Fall back to plain text invocation on any structured-output failure.
                 pass
 
         resp = llm.invoke(msg)
@@ -165,6 +163,7 @@ class KGRAGExPipeline:
         return (txt[:1].upper() if txt else ""), 1, tin, tout
 
     def _path_as_chain_str(self, path_lists: PathAsLists) -> str:
+        # Render a PathAsLists into the canonical "node->[edge]->node" chain string format.
         nl = path_lists.node_list or []
         el = path_lists.edge_list or []
         if len(nl) < 2 or len(el) < 1:
@@ -178,6 +177,7 @@ class KGRAGExPipeline:
         return chain
 
     def _steps_to_path_as_lists(self, steps: List[KGStep]) -> PathAsLists:
+        # Convert KG steps to PathAsLists while also producing a consistent chain string.
         if not steps:
             return PathAsLists(node_list=[], edge_list=[], subpath_list=[], chain_str="")
 
@@ -208,6 +208,7 @@ class KGRAGExPipeline:
         )
 
     def _path_lists_to_steps(self, path_lists: PathAsLists) -> List[KGStep]:
+        # Convert PathAsLists back to KGStep objects, adapting to KGStep's constructor signature.
         out: List[KGStep] = []
 
         try:
@@ -237,6 +238,7 @@ class KGRAGExPipeline:
             try:
                 out.append(KGStep(**kwargs))
             except TypeError:
+                # Compatibility fallback if KGStep expects edge to be a string instead of a dict.
                 if "edge" in params:
                     kwargs["edge"] = str(rel)
                 out.append(KGStep(**kwargs))
@@ -250,6 +252,7 @@ class KGRAGExPipeline:
         gold_answer: Optional[str],
         options: str = "",
     ) -> KGRAGRun:
+        # Extract entities and entity pairs from the question.
         q = self.query.extract_entities(question)
         qents = q.entities
         pairs = q.pairs
@@ -258,6 +261,7 @@ class KGRAGExPipeline:
         path_lists_used: List[PathAsLists] = []
         primary_steps: List[KGStep] = []
 
+        # Prefer paths derived from extracted entity pairs.
         for a_raw, b_raw in pairs:
             a = self.query.map_to_node(a_raw)
             b = self.query.map_to_node(b_raw)
@@ -279,6 +283,7 @@ class KGRAGExPipeline:
             chains.append(chain)
             path_lists_used.append(pl)
 
+        # Fallback: if no chains were found, try all pairwise combinations of mapped entities.
         if not chains:
             mapped: List[str] = []
             for e in qents:
@@ -305,6 +310,7 @@ class KGRAGExPipeline:
                     chains.append(chain)
                     path_lists_used.append(pl)
 
+        # Generate one pseudo paragraph per chain, then join into a single context.
         llm_calls = 0
         tokens_in = 0
         tokens_out = 0
@@ -324,9 +330,11 @@ class KGRAGExPipeline:
             tokens_in += int(tin)
             tokens_out += int(tout)
 
+        # Record the endpoints of the primary path, if any.
         start = str(primary_steps[0].subject) if primary_steps else None
         end = str(primary_steps[-1].object) if primary_steps else None
 
+        # Store the first chain as the "primary" chain, when available.
         primary_chain = chains[0] if chains else ""
 
         return KGRAGRun(

@@ -1,4 +1,3 @@
-# src/modules/kg_query_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,15 +15,18 @@ from src.modules.llm.llm_json import LLMJSON
 
 @dataclass(frozen=True)
 class QueryEntities:
+    # Output container for extracted entities and the entity pairs to be considered for path search.
     entities: List[str]
     pairs: List[Tuple[str, str]]
 
 
+# Precompiled regex helpers for canonicalization and tokenization.
 _WS = re.compile(r"\s+")
 _PUNCT = re.compile(r"[^a-z0-9\s]")
 
 
 def _canon_text(s: str) -> str:
+    # Normalize text for matching: lowercase, strip, remove punctuation, and collapse whitespace.
     s = (s or "").strip().lower()
     s = s.replace("\u00a0", " ")
     s = _PUNCT.sub(" ", s)
@@ -33,11 +35,13 @@ def _canon_text(s: str) -> str:
 
 
 def _token_set(s: str) -> set[str]:
+    # Tokenize normalized text into a set for overlap-based similarity scoring.
     s = _canon_text(s)
     return set([t for t in s.split() if t])
 
 
 def _pair_key(a: str, b: str) -> tuple[str, str]:
+    # Order-independent key for de-duplicating entity pairs.
     ca, cb = _canon_text(a), _canon_text(b)
     return (ca, cb) if ca <= cb else (cb, ca)
 
@@ -46,12 +50,14 @@ class KGQueryService:
         self.kg = kg
         self.llm_client = llm_client
 
+        # Snapshot node names and derived lookup structures for fast mapping.
         self._nodes: List[str] = [str(n) for n in self.kg.g.nodes]
 
         self._node_names: dict[str, str] = {n: n for n in self._nodes}
         self._node_tokens: dict[str, set[str]] = {n: _token_set(self._node_names[n]) for n in self._nodes}
         self._node_canon_name: dict[str, str] = {n: _canon_text(self._node_names[n]) for n in self._nodes}
 
+        # Exact-match index by canonical node name.
         self._node_by_canon: dict[str, str] = {}
         for n in self._nodes:
             c = self._node_canon_name[n]
@@ -60,35 +66,30 @@ class KGQueryService:
 
 
     def extract_entities(self, question: str) -> QueryEntities:
-        """
-        Notebook nah:
-        - LLM extrahiert Entities, optional Pairs
-        - Danach: Pairs werden immer auf alle Kombinationen der Entities ergänzt
-        (damit bei 3 Entities auch 3 Paare entstehen, sofern alle 3 Entities existieren)
-        """
+        # Prefer the LLM-based extractor when available, and enforce a JSON-only contract.
         if self.llm_client:
             llm = self.llm_client.get_llm()
             if llm is not None:
                 prompt = f"""
-    Return ONLY JSON, no extra text.
+                Return ONLY JSON, no extra text.
 
-    Schema:
-    {{
-    "entities": ["...", "..."],
-    "pairs": [["...", "..."], ["...", "..."]]
-    }}
+                Schema:
+                {{
+                "entities": ["...", "..."],
+                "pairs": [["...", "..."], ["...", "..."]]
+                }}
 
-    Task:
-    Extract central medical entities from the question.
-    Entities must be short noun phrases.
-    Do not output answer options or single letters.
+                Task:
+                Extract central medical entities from the question.
+                Entities must be short noun phrases.
+                Do not output answer options or single letters.
 
-    Additionally:
-    You MAY output pairs, but the system will consider all pairwise combinations of the extracted entities anyway.
+                Additionally:
+                You MAY output pairs, but the system will consider all pairwise combinations of the extracted entities anyway.
 
-    Question:
-    {question}
-    """.strip()
+                Question:
+                {question}
+                """.strip()
 
                 resp = llm.invoke(prompt)
                 raw = (getattr(resp, "content", str(resp)) or "").strip()
@@ -97,6 +98,7 @@ class KGQueryService:
                 ents_out: List[str] = []
                 pairs_out: List[Tuple[str, str]] = []
 
+                # Parse and sanitize LLM output, filtering out MCQ option letters.
                 if isinstance(parsed, dict):
                     ents = parsed.get("entities")
                     if isinstance(ents, list):
@@ -122,17 +124,14 @@ class KGQueryService:
                                 continue
                             pairs_out.append((a, b))
 
-                # Entities zusätzlich aus Pairs ergänzen
                 for a, b in pairs_out:
                     if a and a not in ents_out:
                         ents_out.append(a)
                     if b and b not in ents_out:
                         ents_out.append(b)
 
-                # Jetzt: alle Kombinationen aus Entities als Paare ergänzen
                 all_pairs = list(combinations(ents_out, 2))
 
-                # Merge: LLM Paare + Kombinations Paare, symmetrisch deduplizieren, Reihenfolge stabil
                 seen = set()
                 pairs_final: List[Tuple[str, str]] = []
 
@@ -145,10 +144,10 @@ class KGQueryService:
 
                 return QueryEntities(entities=ents_out, pairs=pairs_final)
 
-        # 2) Heuristik Pfad ohne LLM bleibt wie bei dir
         q = _canon_text(question)
         hits = [self._node_names[n] for n in self._nodes if self._node_canon_name[n] and self._node_canon_name[n] in q]
 
+        # Fallback: token overlap scoring against KG node names when substring hits are insufficient.
         if len(hits) < 2:
             toks = _token_set(question)
             scored: List[Tuple[int, str]] = []
@@ -163,6 +162,7 @@ class KGQueryService:
         return QueryEntities(entities=hits, pairs=pairs)
 
     def map_to_node(self, ent: str) -> Optional[str]:
+        # Map a free-text entity mention to a KG node via exact canonical match, then fuzzy similarity.
         if not ent:
             return None
 
@@ -201,6 +201,7 @@ class KGQueryService:
         return None
 
     def pick_pair_with_path(self, entities: List[str]) -> Optional[Tuple[str, str]]:
+        # Choose the pair of mapped entities with the shortest undirected path, preferring connectivity.
         mapped: List[str] = []
         for e in entities:
             m = self.map_to_node(e)

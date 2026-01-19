@@ -105,20 +105,16 @@ class ShapExplainer:
 
                 instance_to_explain = np.ones((1, num_tokens))
                 
-                nsamples = 100*num_tokens
+                nsamples = 150*num_tokens
 
                 shap_values = explainer.shap_values(instance_to_explain, nsamples=nsamples, silent=True)[0]
-                
-                # Mean centering for interpretation
-                mean_shap = np.mean(shap_values)
-                centered_shap_values = shap_values - mean_shap
 
                 # Aggregate Tokens back to full words
                 words, shap_values = self.aggregate_shap_to_words(shap_values, display_tokens)
 
                 explanations_hop.append ({
                     "shap_values": shap_values,
-                    "centered_shap_values": centered_shap_values,
+                    "base_value": explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value,
                     "tokens": words, # display_tokens
                     "base_text": doc_text,
                     "query": query,
@@ -315,7 +311,9 @@ class ShapExplainer:
     def plot_bar(self, explanations: Dict[str, Any]):
         """Helper to plot the shap bar plot."""
 
-        print(f"Score: {explanations['score']:.4f}")
+        predicted_score = round(explanations['base_value'] + np.sum(explanations["shap_values"]), 4)
+
+        print(f"Base Score (Intercept): {explanations['base_value']:.4f} | Predicted Score: {predicted_score} | Actual Score: {explanations['score']:.4f}")
         
         # Use SHAP's built-in text plotter
         return shap.plots.bar(shap.Explanation(

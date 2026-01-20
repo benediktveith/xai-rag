@@ -248,7 +248,6 @@ websocket-client==1.9.0
 websockets==15.0.1
 Werkzeug==3.1.4
 wrapt==1.17.3
--e git+https://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@github.com/benediktveith/xai-rag.git@67738fe3c6dfc86ae975dcde2a4f2bd7a29bcd4e#egg=xai_rag
 xxhash==3.6.0
 yarl==1.22.0
 zipp==3.23.0

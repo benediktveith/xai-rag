@@ -30,9 +30,6 @@ class StatPearlsBuildStats:
 
 class StatPearlsDataLoader:
     """
-    Repo Stil, aber als Loader Datei.
-
-    Quelle, wie im Repo:
     https://ftp.ncbi.nlm.nih.gov/pub/litarch/3d/12/statpearls_NBK430685.tar.gz
 
     Output Ordnerstruktur:

@@ -6,7 +6,6 @@ from langchain_core.documents import Document
 from tqdm import tqdm
 
 class DataLoader:
-
     def __init__(self):
         try:
             src_dir = Path(__file__).resolve().parent.parent
@@ -110,16 +109,12 @@ class DataLoader:
                     supporting_map[title] = set()
                 supporting_map[title].add(sent_id)
             
-            # Process each context articl
             for title, sentences in context:
-                # Join sentences to create the full chunk text
                 content = " ".join(sentences)
                 
-                # Identify which sentences in THIS paragraph are "gold"
                 gold_indices = list(supporting_map.get(title, set()))
                 is_supporting = len(gold_indices) > 0
                 
-                # Create document with RICH metadata for Explainability
                 doc = Document(
                     page_content=content,
                     metadata={
@@ -127,7 +122,6 @@ class DataLoader:
                         "question_id": question_id,
                         "question": question,
                         "answer": answer,
-                        # Crucial for Plausibility Metric:
                         "is_supporting": is_supporting, 
                         "gold_sentence_indices": ",".join(map(str, gold_indices)), 
                         "source": "hotpotqa"

@@ -105,7 +105,6 @@ class MedMCQADataLoader:
         zip_path = self.RAW_DIR / "temp_data.zip"
 
         try:
-            # Download the ZIP file
             if not zip_path.exists():
                 print(f"Downloading ID {self.FILE_ID} from Google Drive...")
                 url = f'https://drive.google.com/uc?id={self.FILE_ID}'
@@ -115,15 +114,12 @@ class MedMCQADataLoader:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 targets = {"train.json", "test.json", "dev.json"}
                 for member in zip_ref.namelist():
-                    # Check if the file is inside the 'data/' folder in the zip
                     print(Path(member).name)
                     
                     if Path(member).name in targets:
-                        # Remove 'data/' prefix to extract directly to RAW_DIR
                         filename = Path(member).name
                         target_path = self.RAW_DIR / filename
                         
-                        # Open the file from zip and write it to the target path
                         with zip_ref.open(member) as source, open(target_path, "wb") as target:
                             shutil.copyfileobj(source, target)
             
@@ -132,7 +128,6 @@ class MedMCQADataLoader:
         except Exception as e:
             raise RuntimeError(f"Failed to download/extract data: {e}")
         finally:
-            # Remove the zip file after extraction to save space
             if zip_path.exists():
                 zip_path.unlink()
 

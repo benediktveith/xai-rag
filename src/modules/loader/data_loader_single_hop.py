@@ -14,7 +14,6 @@ class BoolQDataLoader:
     and question/answer metadata.
     """
 
-    # Candidate sources per split; loader picks the first that downloads successfully.
     BOOLQ_SOURCES: Dict[str, List[Dict[str, str]]] = {
         "train": [
             {"format": "jsonl", "url": "https://storage.googleapis.com/boolq/train.jsonl"},
@@ -37,14 +36,12 @@ class BoolQDataLoader:
             src_dir = Path(__file__).resolve().parent
             self.PROJECT_ROOT = src_dir.parent.parent
         except NameError:
-            # Fallback when __file__ is not set (e.g., in some notebook contexts)
             self.PROJECT_ROOT = Path.cwd()
 
         self.DATA_DIR = self.PROJECT_ROOT / "data" / "boolq"
         self.RAW_DIR = self.DATA_DIR / "raw"
         self.RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Will hold cached split data after first load
         self._cache: Dict[str, List[Dict[str, Any]]] = {}
 
     def setup(

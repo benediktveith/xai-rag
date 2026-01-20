@@ -49,3 +49,5 @@ thumbs.db        # Windows
 docs/*
 faiss_*/
 .env
+
+Statement of Contribution.md

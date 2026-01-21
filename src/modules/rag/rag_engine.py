@@ -84,6 +84,7 @@ class RAGEngine:
         results = self._vectorstore.similarity_search_with_relevance_scores(query, k=k)
         trace: List[Dict[str, Any]] = []
 
+        # set similarity scores to be 0 < s < 1
         for idx, (doc, score) in enumerate(results):
             s = float(score)
             if s < 0.0:

@@ -8,7 +8,6 @@ class KNRMWrapper(nn.Module):
         super().__init__()
         self.embedding = embedding_layer
         
-        # Kernels: specific similarity levels we care about
         # 1.0 = Exact match, 0.9 = Synonym, 0.7 = Related, etc.
         if mu is None:
             self.mu = torch.tensor([1.0, 0.9, 0.7, 0.5, 0.3, 0.1, -0.1], device="cuda")

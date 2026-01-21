@@ -50,7 +50,6 @@ class BaseInteractionEngine:
         
         print("Building vocabulary...")
         for doc in documents:
-            # USE CLEAN TOKENIZER
             for word in self._clean_tokenize(doc):
                 if word not in self.vocab:
                     self.vocab[word] = len(self.vocab)
@@ -58,12 +57,10 @@ class BaseInteractionEngine:
         vocab_size = len(self.vocab)
         print(f"Vocab size: {vocab_size}")
 
-        # Initialize Embedding Matrix
         embedding_matrix = np.random.normal(scale=0.6, size=(vocab_size, self.embedding_dim))
         embedding_matrix[0] = np.zeros(self.embedding_dim) # PAD
 
         found = 0
-        # Debug: Print first 5 missing words to see why they fail
         missing_samples = []
         
         for word, idx in self.vocab.items():
@@ -92,7 +89,6 @@ class BaseInteractionEngine:
             self.model.embedding = self.embedding
 
     def text_to_ids(self, text: str, max_len=300):
-        # USE SAME CLEAN TOKENIZER
         clean_words = self._clean_tokenize(text)
         ids = [self.vocab.get(w, 1) for w in clean_words]
         

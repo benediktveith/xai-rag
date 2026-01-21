@@ -23,7 +23,6 @@ class ShapExplainer:
     def __init__(
         self,
         rag_engine,
-        # Default to the embedding model's name, not generic BERT
         documents,
         tokenizer_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         idf_top_k: int = 150
@@ -36,7 +35,7 @@ class ShapExplainer:
         print(f"Loading tokenizer for: {model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        # 2. Pre-calculate Low-IDF tokens if documents are provided
+        # pre-calculate Low-IDF tokens if documents are provided
         self.low_idf_ids = []
         if documents:
             print(f"Calculating IDF for {len(documents)} documents...")
@@ -80,7 +79,7 @@ class ShapExplainer:
 
                 doc_text = doc.page_content
                 
-                # Tokenize to IDs for safe reconstruction
+                # tokenize to IDs for safe reconstruction
                 encoded = self.tokenizer(doc_text, add_special_tokens=False)
                 token_ids = np.array(encoded['input_ids'])
                 display_tokens = self.tokenizer.convert_ids_to_tokens(token_ids)
@@ -88,7 +87,7 @@ class ShapExplainer:
                 
                 query_embedding = self._embed_text([query])
 
-                # Create Prediction Function based on selected background strategy
+                # create prediction function based on selected background strategy
                 prediction_fn = self._create_similarity_prediction_fn(
                     query_embedding=query_embedding, 
                     original_token_ids=token_ids,
@@ -96,9 +95,9 @@ class ShapExplainer:
                 )
 
                 # SHAP Setup
-                # Background is always zeros (representing "masked state")
-                # The prediction_fn interprets what "masked" means (delete vs replace)
-                # Hence, the background is not always "0" in the model interpretation,
+                # background is always zeros (representing "masked state")
+                # the prediction_fn interprets what "masked" means (delete vs replace)
+                # hence, the background is not always "0" in the model interpretation,
                 # it depends on the background type selected (Zero or Low_IDF)!
                 background_data = np.zeros((1, num_tokens))
                 explainer = shap.KernelExplainer(prediction_fn, background_data)
@@ -109,7 +108,7 @@ class ShapExplainer:
 
                 shap_values = explainer.shap_values(instance_to_explain, nsamples=nsamples, silent=True)[0]
 
-                # Aggregate Tokens back to full words
+                # aggregate Tokens back to full words
                 words, shap_values = self.aggregate_shap_to_words(shap_values, display_tokens)
 
                 explanations_hop.append ({
@@ -201,8 +200,8 @@ class ShapExplainer:
             return []
             
         try:
-            # 1. Compute IDF including stop words (to avoid shift in meaning)
-            document_text = [doc.page_content for doc in documents] # convert Document object to string
+            # compute IDF including stop words (to avoid shift in meaning)
+            document_text = [doc.page_content for doc in documents]
 
             vectorizer = TfidfVectorizer(use_idf=True, smooth_idf=True)
             vectorizer.fit_transform(document_text)
@@ -210,16 +209,14 @@ class ShapExplainer:
             feature_names = vectorizer.get_feature_names_out()
             idf_scores = vectorizer.idf_
             
-            # 2. Sort by IDF (ascending = most common)
+            # sort idf_score to get lowest ones
             sorted_items = sorted(zip(feature_names, idf_scores), key=lambda x: x[1])
             low_idf_words = [word for word, score in sorted_items[:top_k]]
             
             print(f"Background Vocabulary (Lowest IDF): {low_idf_words}")
             
-            # 3. Convert to IDs
             low_idf_ids = []
             for word in low_idf_words:
-                # We want single IDs. If a word splits, take the first piece.
                 encoded = self.tokenizer.encode(word, add_special_tokens=False)
                 if encoded:
                     low_idf_ids.append(encoded[0])
@@ -258,14 +255,14 @@ class ShapExplainer:
             rng = np.random.default_rng()
 
             for mask in mask_batch:
-                # Identify which tokens are KEPT (1) and which are MASKED (0)
-                # We then apply the selected Background image type
+                # identify which tokens are KEPT (1) and which are MASKED (0)
+                # then apply the selected Background image type
                 kept_indices = np.where(mask == 1.0)[0]
                 masked_indices = np.where(mask == 0.0)[0]
 
                 if mode == "Zero":
                     # --- ZERO MODE: DELETION ---
-                    # Only keep the IDs where mask is 1
+                    # nnly keep the IDs where mask is 1
                     active_ids = original_token_ids[kept_indices].astype(int)
                     
                     if len(active_ids) == 0:
@@ -277,23 +274,21 @@ class ShapExplainer:
                     # --- IDF MODE: REPLACEMENT ---
                     current_ids = original_token_ids.copy()
                     
-                    # If we have masked tokens, replace them with random fillers
+                    # if masked tokens, replace them with random fillers
                     if len(masked_indices) > 0:
                         replacements = rng.choice(self.low_idf_ids, size=len(masked_indices))
                         current_ids[masked_indices] = replacements
                     
-                    # Decode the FULL length sequence
+                    # decode the FULL length sequence
                     reconstructed_texts.append(self.tokenizer.decode(current_ids))
 
             # --- BATCH EMBEDDING ---
             if not reconstructed_texts:
                 return np.array([])
             
-            # Filter out empty strings to prevent model crashes
             valid_indices = [i for i, t in enumerate(reconstructed_texts) if t.strip()]
             valid_texts = [reconstructed_texts[i] for i in valid_indices]
             
-            # Init scores with baseline (0.0)
             scores = np.zeros(len(reconstructed_texts))
             
             if valid_texts:
@@ -301,7 +296,7 @@ class ShapExplainer:
                 sims = torch.mm(doc_embeddings, query_embedding.transpose(0, 1))
                 sims_np = sims.flatten().numpy()
                 
-                # Map back to original positions
+                # map back to original positions
                 np.put(scores, valid_indices, sims_np)
             
             return scores
@@ -315,10 +310,9 @@ class ShapExplainer:
 
         print(f"Base Score (Intercept): {explanations['base_value']:.4f} | Predicted Score: {predicted_score} | Actual Score: {explanations['score']:.4f}")
         
-        # Use SHAP's built-in text plotter
         return shap.plots.bar(shap.Explanation(
             values=explanations["shap_values"],
-            base_values=0, # approx baseline
+            base_values=explanations["base_value"], # approx baseline
             data=explanations["tokens"]
         ))
 
@@ -342,7 +336,6 @@ class ShapExplainer:
             if weight == 0:
                 return "transparent", "black"
             
-            # Alpha based on relative weight strength
             alpha = (abs(weight) / max_weight)
             
             if weight > 0:
@@ -352,7 +345,6 @@ class ShapExplainer:
                 # BLUE for Negative
                 return f"rgba(0, 0, 255, {alpha:.2f})", "black"
 
-        # Split text loosely to wrap spans
         html_parts = []
         
         html_parts.append(f"<div style='border:1px solid #ddd; padding:15px; font-family:sans-serif; line-height:1.6;'>")
@@ -368,7 +360,6 @@ class ShapExplainer:
             
         html_parts.append("</div>")
         
-        # Render
         display(HTML(" ".join(html_parts)))
 
     def aggregate_shap_to_words(self, shap_values, tokens):
@@ -383,23 +374,19 @@ class ShapExplainer:
         current_score = 0.0
         
         for token, score in zip(tokens, shap_values):
-            # For BERT (MiniLM), subwords start with ##
+            # for BERT (MiniLM), subwords start with ##
             
             if token.startswith("##"):
-                # It's a continuation of the previous word
                 current_word += token.replace("##", "")
                 current_score += score
             else:
-                # It's a new word. Save the previous one if it exists.
                 if current_word != "":
                     word_map.append(current_word)
                     word_scores.append(current_score)
                 
-                # Start tracking the new word
                 current_word = token
                 current_score = score
                 
-        # Append the last remaining word
         if current_word:
             word_map.append(current_word)
             word_scores.append(current_score)

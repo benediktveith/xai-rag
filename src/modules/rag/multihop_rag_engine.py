@@ -55,7 +55,6 @@ class MultiHopRAGEngine:
                 print("No documents found for this hop. Stopping.")
                 break
             
-            # For simplicity, we'll focus on the top document for the trace
             top_doc = retrieved_docs[0]
             lowest_doc = retrieved_docs[-1] # also track the lowest ranked document
             context_docs = retrieved_docs[:min(4,len(retrieved_docs))]
@@ -65,7 +64,7 @@ class MultiHopRAGEngine:
             all_documents.extend(new_docs)
             retrieved_document_ids.extend([doc.id for doc in new_docs])
 
-            # 2. Store the results of this hop in our trace
+            # 2. Store the results of this hop in the trace
             hop_info = {
                 "hop_number": hop_number,
                 "query_for_this_hop": current_query,

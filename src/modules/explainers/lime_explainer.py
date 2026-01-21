@@ -11,7 +11,6 @@ from IPython.display import display, HTML
 
 class LimeExplainer:
 
-    # Options for explain function
     _DOC_TYPES = Literal["highest_ranked_document", "lowest_ranked_documents", "context_documents"]
 
     def __init__(self, rag_engine):
@@ -44,14 +43,13 @@ class LimeExplainer:
                 
                 doc_text = doc.page_content
                 
-                # Setup the prediction function wrapper
+                # setup the prediction function wrapper
                 prediction_fn = self._create_similarity_prediction_fn(query)
                 
-                # Get true score for display (extracting the 'relevant' score)
                 true_probs = prediction_fn([doc_text])
                 true_score = true_probs[0, 1] 
 
-                # Run LIME
+                # run LIME
                 # labels=(1,) tells LIME we only care about explaining Class 1 ("relevant")
                 explanation = explainer.explain_instance(
                     doc_text,
@@ -61,11 +59,11 @@ class LimeExplainer:
                     num_samples=3000 
                 )
 
-                # Extract data for Class 1
+                # extract data for Class 1
                 # LIME returns a map of {label: list_of_tuples}
                 explanation_tuples = explanation.as_list(label=1)
                 
-                # Get the intercept (baseline probability) for Class 1
+                # get the intercept (baseline probability) for Class 1
                 # explanation.intercept is a dict {label: value}
                 lime_intercept = explanation.intercept[1]
                 lime_prediction = explanation.local_pred[0] # Usually a float for the specific label
@@ -86,7 +84,6 @@ class LimeExplainer:
 
     def _embed_text(self, text: List[str]) -> torch.Tensor:
         """Helper to generate normalized embeddings for a list of strings."""
-        # Handle cases where embedding model returns different types
         embeddings = self.rag_engine.embedding_model.embed_documents(text)
         
         if isinstance(embeddings, list):
@@ -104,20 +101,19 @@ class LimeExplainer:
             if not perturbed_texts:
                 return np.array([]).reshape(0, 2)
             
-            # Handle empty strings
             cleaned_texts = [t if t.strip() else " " for t in perturbed_texts]
             doc_embeddings = self._embed_text(cleaned_texts)
             
-            # Calculate Cosine Similarity
+            # calculate Cosine Similarity
             scores = torch.mm(query_embedding, doc_embeddings.transpose(0, 1)).flatten()
             scores_np = scores.numpy()
             
-            # 1. Force 0.0 for empty strings
+            # force 0.0 for empty strings
             for i, text in enumerate(perturbed_texts):
                 if not text.strip():
                     scores_np[i] = 0.0
             
-            # 2. Clip to ensure valid probabilities [0, 1]
+            # clip to ensure valid probabilities [0, 1]
             scores_np = np.clip(scores_np, 0.0, 1.0)
             
             # Column 0: Irrelevant (1 - score)
@@ -135,11 +131,9 @@ class LimeExplainer:
         true_score = explanation_data["true_score"]
         intercept = explanation_data["lime_intercept"]
         
-        # Unpack tuples
         labels = [t[0] for t in tuples]
         values = [t[1] for t in tuples]
 
-        # Handle "Rest of features" logic
         if len(values) > top_k:
             sum_topk_to_last = np.sum(values[top_k:])
             labels = labels[:top_k]
@@ -147,25 +141,20 @@ class LimeExplainer:
             labels.append(f"Sum of others")
             values.append(sum_topk_to_last)
 
-        # Totals
-        weight_sum = np.sum(values) # Sum of displayed bars (including "others")
-        lime_total = intercept + np.sum([t[1] for t in tuples]) # Total LIME prediction
+        weight_sum = np.sum(values) # sum of displayed bars (including "others")
+        lime_total = intercept + np.sum([t[1] for t in tuples]) # total LIME prediction
 
-        # Colors: Green for positive contribution, Red for negative
         colors = ['tab:red' if v > 0 else 'tab:blue' for v in values]
 
         plt.figure(figsize=(10, 6))
         
-        # Plot bars (Reverse for top-down view)
         y_pos = np.arange(len(labels))
         plt.barh(y_pos, values[::-1], color=colors[::-1])
         plt.yticks(y_pos, labels[::-1])
 
-        # Centerline
         plt.axvline(0, color='black', lw=0.8, linestyle='--')
         plt.xlabel("Contribution to Cosine Similarity")
-        
-        # Informative Title
+       
         plt.title(
             f"Why this document? (LIME Regression)\n"
             f"Base Score (Intercept): {intercept:.3f} | Predicted Score: {lime_total:.3f} | Actual Score: {true_score:.3f}"
@@ -184,7 +173,7 @@ class LimeExplainer:
         text = explanation_data["document_text"]
         weights = dict(explanation_data["explanation_tuples"])
         
-        # Normalize weights for color intensity
+        # normalize weights for color intensity
         if not weights:
             print("No weights to plot.")
             return
@@ -200,14 +189,11 @@ class LimeExplainer:
             if weight == 0:
                 return "transparent", "black"
             
-            # Alpha (opacity) based on relative weight strength
             alpha = (abs(weight) / max_weight)
             
             if weight > 0:
-                # RED for Positive
                 return f"rgba(255, 0, 0, {alpha:.2f})", "black"
             else:
-                # BLUE for Negative
                 return f"rgba(0, 0, 255, {alpha:.2f})", "black"
 
         # Split text loosely to wrap spans
@@ -226,5 +212,4 @@ class LimeExplainer:
             
         html_parts.append("</div>")
         
-        # Render
         display(HTML(" ".join(html_parts)))

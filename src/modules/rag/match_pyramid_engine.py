@@ -19,7 +19,7 @@ class MatchPyramidWrapper(nn.Module):
         q_emb = self.embedding(q_ids) # [Batch, Q_len, Dim]
         d_emb = self.embedding(d_ids) # [Batch, D_len, Dim]
 
-        # 2. Build Interaction Matrix (The "Image")
+        # 2. Build Interaction Matrix
         # [Batch, Q, Dim] @ [Batch, Dim, D] -> [Batch, Q, D]
         interaction = torch.bmm(q_emb, d_emb.transpose(1, 2))
         
